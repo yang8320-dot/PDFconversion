@@ -1,0 +1,82 @@
+name: 產生專案代碼 Context
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Create and Run Context Generator
+        run: |
+          cat << 'EOF' > generate_context.py
+          import os
+
+          # 將目標資料夾設為 GitHub Repository 的根目錄
+          TARGET_DIR = '.'
+          
+          # 針對目前的 Python 專案設定需要彙整的副檔名
+          valid_extensions = (
+              '.py', '.txt', '.yml', '.md', '.json'
+          )
+          
+          # 排除 Python 打包、快取，以及我們設計的 Library 目錄
+          exclude_dirs = {'__pycache__', 'build', 'dist', 'Library', 'poppler_bin', '.git', '.github', '.venv'}
+
+          file_paths = []
+          full_content = []
+
+          for root, dirs, files in os.walk(TARGET_DIR):
+              # 進行目錄排除過濾
+              dirs[:] = [d for d in dirs if d not in exclude_dirs]
+              for file in files:
+                  # 排除生成腳本自己，以免產生無限迴圈或雜亂代碼
+                  if file == 'generate_context.py':
+                      continue
+                      
+                  if file.lower().endswith(valid_extensions):
+                      file_path = os.path.join(root, file)
+                      rel_path = os.path.relpath(file_path, '.')
+                      file_paths.append(rel_path)
+                      try:
+                          # [span_3](start_span)讀取檔案內容[span_3](end_span)
+                          with open(file_path, 'r', encoding='utf-8', errors='ignore') as code_f:
+                              content = code_f.read()
+                      except Exception as e:
+                          content = f"// 無法讀取此檔案: {e}\n"
+                      
+                      # [span_4](start_span)格式化標頭並加入到彙整列表中[span_4](end_span)
+                      header = f"\n{'='*60}\n/// FILE: {rel_path} ///\n{'='*60}\n\n"
+                      full_content.append(header + content + "\n")
+
+          # [span_5](start_span)產生檔案結構總覽[span_5](end_span)
+          with open('0_project_tree.txt', 'w', encoding='utf-8') as f_tree:
+              f_tree.write(f"# PDF 工具專案檔案總覽 (總計 {len(file_paths)} 個檔案)\n\n")
+              for path in sorted(file_paths):
+                  f_tree.write(f"- {path}\n")
+
+          # 產生完整代碼彙整
+          with open('project_context_all.txt', 'w', encoding='utf-8') as f_all:
+              f_all.write(f"# PDF 工具專案完整代碼總覽\n")
+              f_all.write("".join(full_content))
+
+          print(f"成功生成目錄與完整內容，共計 {len(file_paths)} 個檔案。")
+          EOF
+          python generate_context.py
+
+      - name: Upload Context Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: PDF-Tool-Source-Context
+          path: |
+            0_project_tree.txt
+            project_context_all.txt
+          retention-days: 7
