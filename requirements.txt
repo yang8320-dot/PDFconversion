@@ -1,0 +1,4 @@
+easyocr
+pdf2image
+python-pptx
+pyinstaller
