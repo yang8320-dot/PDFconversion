@@ -19,7 +19,7 @@ jobs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: '3.12' # 已更新為目前最廣泛實用的 Python 3.12
+        python-version: '3.12'
 
     - name: Install Build Dependencies
       run: |
@@ -28,30 +28,26 @@ jobs:
 
     - name: Download and Prep Poppler
       run: |
-        # 下載 Poppler Windows 執行檔
         Invoke-WebRequest -Uri "https://github.com/oschwartz10612/poppler-windows/releases/download/v24.02.0-0/Release-24.02.0-0.zip" -OutFile "poppler.zip"
         Expand-Archive -Path "poppler.zip" -DestinationPath "poppler_temp"
         
-        # 建立 Library/poppler_bin 資料夾，並將檔案移入
         New-Item -ItemType Directory -Path "Library/poppler_bin"
         Copy-Item -Path "poppler_temp/poppler-24.02.0/Library/bin/*" -Destination "Library/poppler_bin" -Recurse
 
     - name: Build Executable (Portable Structure)
       run: |
-        # 使用 PyInstaller 打包
-        # --onedir: 資料夾模式
-        # --contents-directory Library: 把相依的 DLL 移入 Library
-        # --add-data: 把剛剛載好的 poppler 裝進打包資料夾的 Library/poppler_bin
-        pyinstaller --noconfirm --onedir --console `
+        # 加入 --collect-all tkinterdnd2 確保拖放功能的依賴檔正確被收集
+        # --noconsole 取消背景黑色的終端機視窗，因為我們已經有完整的圖形化介面了
+        pyinstaller --noconfirm --onedir --noconsole `
           --contents-directory "Library" `
           --add-data "Library/poppler_bin;Library/poppler_bin" `
+          --collect-all tkinterdnd2 `
           --name "PDF_to_PPT_OCR" `
           main.py
 
     - name: Package to Zip
       shell: pwsh
       run: |
-        # 根據手動輸入的版本號命名壓縮檔
         $VERSION = "${{ github.event.inputs.version_name }}"
         Compress-Archive -Path dist/PDF_to_PPT_OCR/* -DestinationPath "PDF_to_PPT_OCR_Portable_$VERSION.zip"
 
