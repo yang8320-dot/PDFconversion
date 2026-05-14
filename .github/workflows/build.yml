@@ -1,0 +1,64 @@
+name: Manual Build OCR Tool Portable
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: '版本名稱 (例如: v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: Install Build Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Download and Prep Poppler
+      run: |
+        # 下載 Poppler Windows 執行檔
+        Invoke-WebRequest -Uri "https://github.com/oschwartz10612/poppler-windows/releases/download/v24.02.0-0/Release-24.02.0-0.zip" -OutFile "poppler.zip"
+        Expand-Archive -Path "poppler.zip" -DestinationPath "poppler_temp"
+        
+        # 建立 Library/poppler_bin 資料夾，並將檔案移入
+        New-Item -ItemType Directory -Path "Library/poppler_bin"
+        Copy-Item -Path "poppler_temp/poppler-24.02.0/Library/bin/*" -Destination "Library/poppler_bin" -Recurse
+
+    - name: Build Executable (Portable Structure)
+      run: |
+        # 使用 PyInstaller 打包
+        # --onedir: 資料夾模式
+        # --contents-directory Library: 把相依的 DLL 移入 Library
+        # --add-data: 把剛剛載好的 poppler 裝進打包資料夾的 Library/poppler_bin
+        pyinstaller --noconfirm --onedir --console `
+          --contents-directory "Library" `
+          --add-data "Library/poppler_bin;Library/poppler_bin" `
+          --name "PDF_to_PPT_OCR" `
+          main.py
+
+    - name: Package to Zip
+      shell: pwsh
+      run: |
+        # 根據手動輸入的版本號命名壓縮檔
+        $VERSION = "${{ github.event.inputs.version_name }}"
+        Compress-Archive -Path dist/PDF_to_PPT_OCR/* -DestinationPath "PDF_to_PPT_OCR_Portable_$VERSION.zip"
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ github.event.inputs.version_name }}
+        files: "*.zip"
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
