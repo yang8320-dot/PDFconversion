@@ -8,7 +8,7 @@ on:
         required: true
         default: 'v1.0.0'
 
-# 加入此區塊：明確賦予 GitHub Actions 寫入權限，解決 403 錯誤
+# 賦予 GitHub Actions 寫入權限 (給 Release 使用)
 permissions:
   contents: write
 
@@ -28,7 +28,6 @@ jobs:
     - name: Install Build Dependencies
       run: |
         python -m pip install --upgrade pip
-        # 確保 PyInstaller 與所有套件都被正確安裝
         pip install pyinstaller
         pip install -r requirements.txt
 
@@ -45,11 +44,6 @@ jobs:
     - name: Build Executable (Portable Structure)
       run: |
         # 使用 PyInstaller 打包
-        # --onedir: 資料夾模式
-        # --noconsole: 隱藏背景黑色命令提示字元視窗
-        # --contents-directory Library: 把相依的 DLL 移入 Library
-        # --add-data: 把剛剛載好的 poppler 裝進打包資料夾的 Library/poppler_bin
-        # --collect-all tkinterdnd2: 確保拖曳功能所需的庫被完整打包
         pyinstaller --noconfirm --onedir --noconsole `
           --contents-directory "Library" `
           --add-data "Library/poppler_bin;Library/poppler_bin" `
@@ -63,6 +57,16 @@ jobs:
         # 根據手動輸入的版本號命名壓縮檔
         $VERSION = "${{ github.event.inputs.version_name }}"
         Compress-Archive -Path dist/PDF_to_PPT_OCR/* -DestinationPath "PDF_to_PPT_OCR_Portable_$VERSION.zip"
+
+    # ==========================================
+    # 新增這段：將檔案上傳到 Actions 頁面的 Artifacts 區塊
+    # ==========================================
+    - name: Upload Build Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: PDF_to_PPT_OCR_Portable_${{ github.event.inputs.version_name }}
+        path: PDF_to_PPT_OCR_Portable_${{ github.event.inputs.version_name }}.zip
+        retention-days: 90 # Artifact 預設保留天數 (最長 90 天)
 
     - name: Create Release
       uses: softprops/action-gh-release@v1
