@@ -14,7 +14,7 @@ def get_poppler_path():
     return os.path.join(get_base_path(), "Library", "poppler_bin")
 
 def get_model_path():
-    return os.path.join(get_base_path(), "Library", "model")
+    return os.path.join(get_base_path(), "Library", "models")
 
 def check_poppler_exists():
     return os.path.exists(get_poppler_path())
@@ -43,11 +43,9 @@ def apply_watermark_removal(img, position="右下角"):
     draw = ImageDraw.Draw(img)
     width, height = img.size
     
-    # 預估浮水印大小 (約寬度 15%, 高度 5%) 並放大遮蔽範圍
     mask_w = int(width * 0.15 * 1.25)
     mask_h = int(height * 0.05 * 1.25)
     
-    # 根據位置計算遮蔽座標與取樣座標
     if position == "右下角":
         box = [width - mask_w, height - mask_h, width, height]
         sample_pt = (width - mask_w - 10, height - mask_h - 10)
