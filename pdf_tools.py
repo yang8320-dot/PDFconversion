@@ -3,11 +3,10 @@ import gc
 import tempfile
 from utils import get_poppler_path, apply_watermark_removal, format_size
 
-# ⚠️ 啟動優化：已將 pypdf, fitz, pptx, pdf2image 移至各別函式內部 (延遲載入 Lazy Import)
-# 這樣一來，程式雙擊啟動時不需要將所有模組載入記憶體，能大幅改善「卡頓等一下下」的問題。
+# --- 基礎合併與轉換 ---
 
 def process_merge_pdfs(input_files, output_path, status_callback, stop_event):
-    from pypdf import PdfWriter  # 延遲載入
+    from pypdf import PdfWriter  
     merger = PdfWriter()
     total = len(input_files)
     for i, pdf in enumerate(input_files):
@@ -18,8 +17,7 @@ def process_merge_pdfs(input_files, output_path, status_callback, stop_event):
     merger.close()
 
 def process_images_to_pdf(input_files, output_path, status_callback, stop_event):
-    import fitz  # 延遲載入
-    """將多張圖片合併成單一 PDF"""
+    import fitz  
     doc = fitz.open()
     total = len(input_files)
     for i, img_path in enumerate(input_files):
@@ -32,6 +30,8 @@ def process_images_to_pdf(input_files, output_path, status_callback, stop_event)
         img_doc.close(); img_pdf.close()
     doc.save(output_path)
     doc.close()
+
+# --- 加密與解鎖 ---
 
 def process_protect_pdf(input_file, output_path, password, status_callback, stop_event):
     from pypdf import PdfWriter, PdfReader
@@ -47,7 +47,6 @@ def process_protect_pdf(input_file, output_path, password, status_callback, stop
 
 def process_unlock_pdf(input_file, output_path, password, status_callback, stop_event):
     from pypdf import PdfWriter, PdfReader
-    """解除 PDF 保全密碼"""
     status_callback("🔓 正在嘗試解鎖 PDF...", 0.3)
     reader = PdfReader(input_file)
     if reader.is_encrypted:
@@ -60,8 +59,9 @@ def process_unlock_pdf(input_file, output_path, password, status_callback, stop_
     status_callback("🔓 正在寫入無密碼檔案...", 0.7)
     with open(output_path, "wb") as f: writer.write(f)
 
+# --- 頁面操作 (提取/分割、刪除、插入空白頁、旋轉) ---
+
 def parse_page_ranges(range_str, total_pages):
-    """解析如 1-3,5 的頁碼範圍字串，轉換為 0-based 索引列表"""
     if not range_str.strip(): return list(range(total_pages))
     pages = set()
     for part in range_str.replace(" ", "").split(","):
@@ -74,12 +74,11 @@ def parse_page_ranges(range_str, total_pages):
 
 def process_split_pdf(input_file, output_path, page_ranges, status_callback, stop_event):
     from pypdf import PdfWriter, PdfReader
-    """分割或提取指定範圍的 PDF 頁面"""
     reader = PdfReader(input_file)
     total_pages = len(reader.pages)
     target_pages = parse_page_ranges(page_ranges, total_pages)
     
-    if os.path.isdir(output_path): # 分割成多個檔案
+    if os.path.isdir(output_path):
         base_name = os.path.splitext(os.path.basename(input_file))[0]
         for i, p_idx in enumerate(target_pages):
             if stop_event.is_set(): return
@@ -88,7 +87,7 @@ def process_split_pdf(input_file, output_path, page_ranges, status_callback, sto
             writer.add_page(reader.pages[p_idx])
             with open(os.path.join(output_path, f"{base_name}_page_{p_idx+1}.pdf"), "wb") as f:
                 writer.write(f)
-    else: # 提取合併成一個檔案
+    else:
         writer = PdfWriter()
         for i, p_idx in enumerate(target_pages):
             if stop_event.is_set(): return
@@ -96,9 +95,42 @@ def process_split_pdf(input_file, output_path, page_ranges, status_callback, sto
             writer.add_page(reader.pages[p_idx])
         with open(output_path, "wb") as f: writer.write(f)
 
+def process_remove_pages(input_file, output_path, page_ranges, status_callback, stop_event):
+    from pypdf import PdfWriter, PdfReader
+    reader = PdfReader(input_file)
+    total_pages = len(reader.pages)
+    pages_to_remove = parse_page_ranges(page_ranges, total_pages)
+    
+    writer = PdfWriter()
+    for i in range(total_pages):
+        if stop_event.is_set(): return
+        status_callback(f"🗑️ 正在掃描並剔除頁面 ({i+1}/{total_pages})...", (i+1)/total_pages)
+        if i not in pages_to_remove:
+            writer.add_page(reader.pages[i])
+            
+    with open(output_path, "wb") as f: writer.write(f)
+
+def process_insert_blank_page(input_file, output_path, page_ranges, status_callback, stop_event):
+    from pypdf import PdfWriter, PdfReader
+    reader = PdfReader(input_file)
+    total_pages = len(reader.pages)
+    insert_after = parse_page_ranges(page_ranges, total_pages)
+    
+    writer = PdfWriter()
+    for i in range(total_pages):
+        if stop_event.is_set(): return
+        status_callback(f"📎 正在處理並插入空白頁 ({i+1}/{total_pages})...", (i+1)/total_pages)
+        page = reader.pages[i]
+        writer.add_page(page)
+        
+        # 若當前頁碼在使用者指定的範圍內，則在該頁「之後」加入一張同尺寸空白頁
+        if i in insert_after:
+            writer.add_blank_page(width=page.mediabox.width, height=page.mediabox.height)
+            
+    with open(output_path, "wb") as f: writer.write(f)
+
 def process_rotate_pdf(input_file, output_path, angle, status_callback, stop_event):
     from pypdf import PdfWriter, PdfReader
-    """旋轉 PDF 頁面"""
     status_callback("🔄 正在旋轉 PDF...", 0.5)
     reader = PdfReader(input_file)
     writer = PdfWriter()
@@ -109,19 +141,111 @@ def process_rotate_pdf(input_file, output_path, angle, status_callback, stop_eve
         writer.pages[-1].rotate(angle_int)
     with open(output_path, "wb") as f: writer.write(f)
 
+# --- 辦公室實用工具 (轉黑白、提取文字、壓縮) ---
+
+def process_to_grayscale(input_file, output_path, status_callback, stop_event, dpi=200):
+    import fitz
+    doc = fitz.open(input_file)
+    new_doc = fitz.open()
+    total = len(doc)
+    
+    for i in range(total):
+        if stop_event.is_set(): return
+        status_callback(f"🖨️ 正在轉換為黑白/灰階 ({i+1}/{total})...", (i+1)/total)
+        page = doc[i]
+        # 利用 PyMuPDF 將頁面渲染為灰階圖片並重新封裝 (保證列印不糊)
+        pix = page.get_pixmap(dpi=dpi, colorspace=fitz.csGRAY)
+        new_page = new_doc.new_page(width=page.rect.width, height=page.rect.height)
+        new_page.insert_image(page.rect, pixmap=pix)
+        
+    new_doc.save(output_path, garbage=4, deflate=True)
+    doc.close()
+    new_doc.close()
+
+def process_extract_text(input_file, output_path, status_callback, stop_event):
+    import fitz
+    doc = fitz.open(input_file)
+    total = len(doc)
+    with open(output_path, "w", encoding="utf-8") as f:
+        for i, page in enumerate(doc):
+            if stop_event.is_set(): return
+            status_callback(f"📄 正在提取文字 ({i+1}/{total})...", (i+1)/total)
+            text = page.get_text("text")
+            f.write(f"--- 第 {i+1} 頁 ---\n")
+            f.write(text + "\n\n")
+    doc.close()
+
+def process_compress_pdf(input_file, output_path, status_callback, stop_event):
+    import fitz
+    status_callback("🗜️ 正在掃描與壓縮 PDF 檔案...", 0.5)
+    orig_size = os.path.getsize(input_file)
+    doc = fitz.open(input_file)
+    if stop_event.is_set(): return
+    doc.save(output_path, garbage=4, deflate=True)
+    doc.close()
+    new_size = os.path.getsize(output_path)
+    return f"壓縮完成！\n原大小: {format_size(orig_size)} ➡️ 新大小: {format_size(new_size)}"
+
+# --- 浮水印處理 ---
+
 def process_add_watermark(input_file, output_path, text, status_callback, stop_event):
     import fitz
-    """添加文字浮水印"""
     doc = fitz.open(input_file)
     total = len(doc)
     for i, page in enumerate(doc):
         if stop_event.is_set(): return
         status_callback(f"🖋️ 正在加入浮水印... ({i+1}/{total})", (i+1)/total)
-        # 簡單在頁面中心稍微偏上方壓印半透明紅色文字
         rect = page.rect
         page.insert_text(fitz.Point(50, rect.height / 2), text, fontsize=48, color=(1, 0, 0))
     doc.save(output_path)
     doc.close()
+
+def process_remove_watermark(input_file, output_path, status_callback, stop_event, dpi=300, position="右下角"):
+    from pdf2image import convert_from_path, pdfinfo_from_path
+    poppler = get_poppler_path()
+    info = pdfinfo_from_path(input_file, poppler_path=poppler)
+    total = info["Pages"]
+    temp_images = []
+    
+    with tempfile.TemporaryDirectory() as temp_dir:
+        for i in range(1, total + 1):
+            if stop_event.is_set(): break
+            status_callback(f"🖌️ 正在抹除浮水印 {i} / {total}...", 0.1 + 0.7*(i/total))
+            page_img = convert_from_path(input_file, dpi=dpi, first_page=i, last_page=i, poppler_path=poppler)[0]
+            page_img = apply_watermark_removal(page_img, position)
+            
+            temp_path = os.path.join(temp_dir, f"page_{i}.jpg")
+            page_img.save(temp_path, "JPEG", quality=95)
+            temp_images.append(temp_path)
+            del page_img; gc.collect()
+            
+        if stop_event.is_set(): return
+        status_callback("💾 正在組合寫入檔案...", 0.9)
+        
+        if output_path.lower().endswith('.pptx'):
+            from pptx import Presentation
+            from PIL import Image
+            prs = Presentation()
+            with Image.open(temp_images[0]) as first_img: width_px, height_px = first_img.size
+            prs.slide_width = int(width_px * 914400 / dpi) 
+            prs.slide_height = int(height_px * 914400 / dpi)
+            for img_path in temp_images:
+                slide = prs.slides.add_slide(prs.slide_layouts[6])
+                slide.shapes.add_picture(img_path, 0, 0, prs.slide_width, prs.slide_height)
+            prs.save(output_path)
+        else:
+            import fitz
+            doc = fitz.open()
+            for img_path in temp_images:
+                img_doc = fitz.open(img_path)
+                pdf_bytes = img_doc.convert_to_pdf()
+                img_pdf = fitz.open("pdf", pdf_bytes)
+                doc.insert_pdf(img_pdf)
+                img_doc.close(); img_pdf.close()
+            doc.save(output_path)
+            doc.close()
+
+# --- 各式轉檔 ---
 
 def process_pdf_to_images(input_file, output_dir, status_callback, stop_event, dpi=300):
     from pdf2image import convert_from_path, pdfinfo_from_path
@@ -178,61 +302,3 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
         if not stop_event.is_set():
             status_callback("💾 正在儲存 PPT 檔案...", 0.95)
             prs.save(output_path)
-
-def process_remove_watermark(input_file, output_path, status_callback, stop_event, dpi=300, position="右下角"):
-    from pdf2image import convert_from_path, pdfinfo_from_path
-    from pptx import Presentation
-    
-    poppler = get_poppler_path()
-    info = pdfinfo_from_path(input_file, poppler_path=poppler)
-    total = info["Pages"]
-    temp_images = []
-    
-    with tempfile.TemporaryDirectory() as temp_dir:
-        for i in range(1, total + 1):
-            if stop_event.is_set(): break
-            status_callback(f"🖌️ 正在抹除浮水印 {i} / {total}...", 0.1 + 0.7*(i/total))
-            page_img = convert_from_path(input_file, dpi=dpi, first_page=i, last_page=i, poppler_path=poppler)[0]
-            page_img = apply_watermark_removal(page_img, position)
-            
-            temp_path = os.path.join(temp_dir, f"page_{i}.jpg")
-            page_img.save(temp_path, "JPEG", quality=95)
-            temp_images.append(temp_path)
-            del page_img; gc.collect()
-            
-        if stop_event.is_set(): return
-        status_callback("💾 正在組合寫入檔案...", 0.9)
-        
-        if output_path.lower().endswith('.pptx'):
-            from PIL import Image
-            prs = Presentation()
-            with Image.open(temp_images[0]) as first_img: width_px, height_px = first_img.size
-            prs.slide_width = int(width_px * 914400 / dpi) 
-            prs.slide_height = int(height_px * 914400 / dpi)
-            
-            for img_path in temp_images:
-                slide = prs.slides.add_slide(prs.slide_layouts[6])
-                slide.shapes.add_picture(img_path, 0, 0, prs.slide_width, prs.slide_height)
-            prs.save(output_path)
-        else:
-            import fitz
-            doc = fitz.open()
-            for img_path in temp_images:
-                img_doc = fitz.open(img_path)
-                pdf_bytes = img_doc.convert_to_pdf()
-                img_pdf = fitz.open("pdf", pdf_bytes)
-                doc.insert_pdf(img_pdf)
-                img_doc.close(); img_pdf.close()
-            doc.save(output_path)
-            doc.close()
-
-def process_compress_pdf(input_file, output_path, status_callback, stop_event):
-    import fitz
-    status_callback("🗜️ 正在掃描與壓縮 PDF 檔案...", 0.5)
-    orig_size = os.path.getsize(input_file)
-    doc = fitz.open(input_file)
-    if stop_event.is_set(): return
-    doc.save(output_path, garbage=4, deflate=True)
-    doc.close()
-    new_size = os.path.getsize(output_path)
-    return f"壓縮完成！\n原大小: {format_size(orig_size)} ➡️ 新大小: {format_size(new_size)}"
