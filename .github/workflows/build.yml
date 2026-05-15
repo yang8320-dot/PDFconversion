@@ -39,12 +39,12 @@ jobs:
         New-Item -ItemType Directory -Path "Library/poppler_bin" -Force
         Copy-Item -Path "poppler_temp/poppler-24.02.0/Library/bin/*" -Destination "Library/poppler_bin" -Recurse
 
-        # 2. 準備 EasyOCR 離線模型 (利用 Python 讓套件自動下載正確網址，再複製出來)
+        # 2. 準備 EasyOCR 離線模型 (修正 print 英文避免 CI 環境編碼錯誤)
         @"
         import easyocr
         import shutil
         import os
-        print('正在下載 EasyOCR 模型...')
+        print('Downloading EasyOCR models...')
         # 實例化 Reader 就會自動下載缺少的模型到預設路徑 (~/.EasyOCR/model)
         easyocr.Reader(['ch_tra', 'ch_sim', 'en'])
         
@@ -52,7 +52,7 @@ jobs:
         src = os.path.join(os.path.expanduser('~'), '.EasyOCR', 'model')
         dst = 'Library/model'
         shutil.copytree(src, dst, dirs_exist_ok=True)
-        print('模型已成功放入 Library/model！')
+        print('Models successfully copied to Library/model!')
         "@ > download_models.py
         
         python download_models.py
