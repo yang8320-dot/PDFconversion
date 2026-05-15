@@ -367,19 +367,20 @@ def process_pdf_to_images(input_file, output_dir, status_callback, stop_event, d
         page_img.save(os.path.join(output_dir, f"{base_name}_{i}.jpg"), 'JPEG')
         del page_img; gc.collect()
 
-# --- 高精度 PDF 轉 PPT (雙軌辨識) ---
+# --- 高精度 PDF 轉 PPT (雙軌辨識 + 格式還原) ---
 
 def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi=300, ppt_mode="圖文排版 (智慧 OCR)"):
     from pptx import Presentation
     from pptx.util import Pt
+    from pptx.dml.color import RGBColor
     import fitz
     from PIL import Image, ImageDraw
     import tempfile
     import os
     from collections import Counter
-    import opencc # 引入簡繁轉換套件
+    import opencc 
     
-    # 建立 s2twp 轉換器：簡體轉台灣繁體(包含常用慣用語)
+    # 建立轉換器：簡體轉台灣繁體
     converter = opencc.OpenCC('s2twp.json')
 
     is_pdf = input_file.lower().endswith('.pdf')
@@ -387,7 +388,7 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
     blank_slide_layout = prs.slide_layouts[6] 
     
     def expand_bbox(x0, y0, x1, y1, scale=1.1, max_w=9999, max_h=9999):
-        """以中心點為基準，等比例向外擴張 BBox，確保能完美蓋住文字毛邊"""
+        """以中心點為基準向外擴張 BBox，確保完美蓋住文字毛邊"""
         cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
         w, h = (x1 - x0) * scale, (y1 - y0) * scale
         new_x0 = max(0, cx - w / 2)
@@ -397,7 +398,7 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
         return [new_x0, new_y0, new_x1, new_y1]
 
     def expand_polygon(points, scale=1.1):
-        """以多邊形重心為基準，將頂點向外擴張，應用於 OCR 不規則四邊形"""
+        """以多邊形重心為基準擴張頂點"""
         if not points: return points
         cx = sum(p[0] for p in points) / len(points)
         cy = sum(p[1] for p in points) / len(points)
@@ -412,7 +413,6 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
         w, h = img_obj.size
         x0, y0, x1, y1 = [int(v) for v in px_bbox]
         samples = []
-        # 在擴張後的區域再向外採樣
         offsets = [
             (x0 - 5, y0 - 5), (x0 + (x1-x0)//2, y0 - 5), (x1 + 5, y0 - 5),
             (x0 - 5, y1 + 5), (x0 + (x1-x0)//2, y1 + 5), (x1 + 5, y1 + 5),
@@ -477,14 +477,33 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
                                 for span in line.get("spans", []):
                                     text = span.get("text", "").strip()
                                     if not text: continue
+                                    
                                     # 開啟強制繁化轉換
                                     text = converter.convert(text)
                                     
+                                    # 解析顏色 (16進制整數解碼為 RGB)
+                                    color_int = span.get("color", 0)
+                                    r = (color_int >> 16) & 255
+                                    g = (color_int >> 8) & 255
+                                    b = color_int & 255
+                                    
+                                    # 解析粗體屬性 (fitz 的 flag, bit 4 為粗體)
+                                    is_bold = bool(span.get("flags", 0) & 16)
+                                    
+                                    # 解析字型名稱並清理 PDF 內嵌的怪異子集字首 (如 AAAAAA+Arial)
+                                    font_name = span.get("font", "微軟正黑體")
+                                    if "+" in font_name:
+                                        font_name = font_name.split("+")[-1]
+                                    if not font_name or font_name.startswith("CIDFont"):
+                                        font_name = "微軟正黑體"
+                                    
                                     bbox = span["bbox"] 
-                                    text_boxes_data.append({"text": text, "bbox": bbox, "size": span.get("size", 12)})
+                                    text_boxes_data.append({
+                                        "text": text, "bbox": bbox, "size": span.get("size", 12),
+                                        "r": r, "g": g, "b": b, "bold": is_bold, "font": font_name
+                                    })
                                     
                                     px_bbox = [v * scale_to_px for v in bbox]
-                                    # 塗抹範圍擴大 110%
                                     exp_px_bbox = expand_bbox(px_bbox[0], px_bbox[1], px_bbox[2], px_bbox[3], scale=1.1, max_w=img_obj.width, max_h=img_obj.height)
                                     bg_color = get_dynamic_bg_color(img_obj, exp_px_bbox)
                                     draw.rectangle(exp_px_bbox, fill=bg_color)
@@ -501,7 +520,12 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
                         p = tf.paragraphs[0]
                         run = p.add_run()
                         run.text = item["text"]
+                        
+                        # 套用字體樣式
                         run.font.size = Pt(item["size"])
+                        run.font.name = item["font"]
+                        run.font.bold = item["bold"]
+                        run.font.color.rgb = RGBColor(item["r"], item["g"], item["b"])
 
                 else:
                     status_callback(f"👁️ 啟動 OCR 進行智慧辨識 (第 {i+1} 頁)...", (i+1)/total)
@@ -517,24 +541,20 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
                         for box_info in result:
                             box = box_info[0]
                             text = box_info[1]
-                            
-                            # 強制將 OCR 辨識結果轉為台灣繁體
                             text = converter.convert(text)
                             
                             x_coords = [p[0] for p in box]
                             y_coords = [p[1] for p in box]
                             px_bbox = (min(x_coords), min(y_coords), max(x_coords), max(y_coords))
-                            # 擴大 Bbox 用於採樣
                             exp_px_bbox = expand_bbox(px_bbox[0], px_bbox[1], px_bbox[2], px_bbox[3], scale=1.1, max_w=img_obj.width, max_h=img_obj.height)
                             bg_color = get_dynamic_bg_color(img_obj, exp_px_bbox)
                             
-                            # 擴大多邊形塗白範圍 110%
                             points = [tuple(p) for p in box]
                             exp_points = expand_polygon(points, scale=1.1)
                             
                             draw.polygon(exp_points, fill=bg_color)
                             exp_points.append(exp_points[0]) 
-                            draw.line(exp_points, fill=bg_color, width=4) # 加粗抗邊緣鋸齒
+                            draw.line(exp_points, fill=bg_color, width=4)
                             
                             px0 = min(x_coords) * scale
                             py0 = min(y_coords) * scale
@@ -553,7 +573,11 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
                             p = tf.paragraphs[0]
                             run = p.add_run()
                             run.text = item["text"]
+                            
+                            # OCR 模式無法獲得原圖字體資訊，套用預設值 (微軟正黑體、黑色)
                             run.font.size = Pt(max(8, item["h"] * 0.75))
+                            run.font.name = "微軟正黑體"
+                            run.font.color.rgb = RGBColor(0, 0, 0)
                     else:
                         slide.shapes.add_picture(img_path, 0, 0, prs.slide_width, prs.slide_height)
 
@@ -582,8 +606,6 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
                     for box_info in result:
                         box = box_info[0]
                         text = box_info[1]
-                        
-                        # 圖片模式也強制繁化
                         text = converter.convert(text)
                         
                         x_coords = [p[0] for p in box]
@@ -602,23 +624,4 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
                         py0 = min(y_coords) * scale
                         pw = (max(x_coords) - min(x_coords)) * scale
                         ph = (max(y_coords) - min(y_coords)) * scale
-                        text_boxes_data.append({"text": text, "x": px0, "y": py0, "w": pw, "h": ph})
-                        
-                    img.save(img_path, "JPEG", quality=95)
-                    slide.shapes.add_picture(img_path, 0, 0, prs.slide_width, prs.slide_height)
-                    
-                    for item in text_boxes_data:
-                        txBox = slide.shapes.add_textbox(Pt(item["x"]), Pt(item["y"]), Pt(item["w"]), Pt(item["h"]))
-                        tf = txBox.text_frame
-                        tf.clear()
-                        tf.word_wrap = False
-                        p = tf.paragraphs[0]
-                        run = p.add_run()
-                        run.text = item["text"]
-                        run.font.size = Pt(max(8, item["h"] * 0.75))
-                else:
-                    slide.shapes.add_picture(img_path, 0, 0, prs.slide_width, prs.slide_height)
-        
-        if not stop_event.is_set():
-            status_callback("💾 正在儲存檔案...", 0.95)
-            prs.save(output_path)
+                        text_boxes_data.append({"text": text,
