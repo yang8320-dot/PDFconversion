@@ -50,7 +50,6 @@ class ListManagerWindow(ctk.CTkToplevel):
         self.app = app
         self.transient(app.root)
         
-        # 移除強制鎖死，改用控制主畫面 UI 狀態，讓主視窗可移動
         self.app.set_ui_state("disabled")
         self.protocol("WM_DELETE_WINDOW", self.on_close)
 
@@ -80,7 +79,6 @@ class ListManagerWindow(ctk.CTkToplevel):
         ctk.CTkButton(btn_frame, text="❌ 移除", command=self.remove_item, fg_color="#cc3333", hover_color="#aa2222").pack(pady=5)
         ctk.CTkButton(btn_frame, text="🚀 開始合併", command=self.start_merge, fg_color="#28a745", hover_color="#218838", height=35).pack(side="bottom", pady=15)
 
-        # 支援拖曳到子視窗
         self.drop_target_register(DND_FILES)
         self.dnd_bind('<<Drop>>', self.on_drop)
 
@@ -154,6 +152,7 @@ class PDFToolApp:
         self.quality_var = ctk.StringVar(value="原畫質 (300 DPI)")
         self.wm_pos_var = ctk.StringVar(value="右下角")
         self.rotate_var = ctk.StringVar(value="90度")
+        self.ppt_mode_var = ctk.StringVar(value="圖文排版 (智慧 OCR)")
 
         self.lbl_dpi = ctk.CTkLabel(self.opt_frame, text="⚙️ 畫質:", font=("Microsoft JhengHei", 12, "bold"))
         self.menu_dpi = ctk.CTkOptionMenu(self.opt_frame, variable=self.quality_var, values=["原畫質 (300 DPI)", "高畫質 (200 DPI)", "中畫質 (150 DPI)", "低畫質 (72 DPI)"], width=130)
@@ -163,6 +162,9 @@ class PDFToolApp:
 
         self.lbl_rot = ctk.CTkLabel(self.opt_frame, text="🔄 旋轉角度:", font=("Microsoft JhengHei", 12, "bold"))
         self.menu_rot = ctk.CTkOptionMenu(self.opt_frame, variable=self.rotate_var, values=["90度", "180度", "270度"], width=90)
+        
+        self.lbl_ppt_mode = ctk.CTkLabel(self.opt_frame, text="📄 PPT 模式:", font=("Microsoft JhengHei", 12, "bold"))
+        self.menu_ppt_mode = ctk.CTkOptionMenu(self.opt_frame, variable=self.ppt_mode_var, values=["圖文排版 (智慧 OCR)", "純圖片簡報 (較快)"], width=160)
 
         self.mode_var.trace_add("write", self.update_options_ui)
         self.update_options_ui() 
@@ -187,6 +189,8 @@ class PDFToolApp:
         mode = self.mode_var.get()
         if mode in ["PPT", "PDF2IMG", "RMWATERMARK", "GRAYSCALE", "FLATTEN"]:
             self.lbl_dpi.pack(side="left", padx=(10, 5), pady=5); self.menu_dpi.pack(side="left", padx=(0, 15))
+        if mode == "PPT":
+            self.lbl_ppt_mode.pack(side="left", padx=(10, 5), pady=5); self.menu_ppt_mode.pack(side="left", padx=(0, 15))
         if mode in ["RMWATERMARK", "IMG_WM"]:
             self.lbl_wm.pack(side="left", padx=(5, 5), pady=5); self.menu_wm.pack(side="left", padx=(0, 15))
         if mode == "ROTATE":
@@ -230,7 +234,6 @@ class PDFToolApp:
                 return messagebox.showwarning("檔案已加密", "⚠️ 此 PDF 受到密碼保護！\n\n請先選擇「解鎖 PDF」功能，輸入密碼將其解密為一般檔案後，再進行操作。")
 
         if mode in ["MERGE", "IMG2PDF"]: 
-            # 修正：傳入 self 而非 self.root
             return ListManagerWindow(self, valid_files, mode, lambda sf: self.trigger_list_process(mode, sf, first_file_name))
 
         output_path = None
@@ -315,6 +318,7 @@ class PDFToolApp:
             extra_args["position"] = self.wm_pos_var.get()
             
         elif mode == "PPT":
+            extra_args["ppt_mode"] = self.ppt_mode_var.get()
             if len(valid_files) == 1: output_path = filedialog.asksaveasfilename(title="儲存 PPT", initialfile=first_file_name, defaultextension=".pptx")
             else:
                 output_path = filedialog.askdirectory(title="選擇批次轉檔的儲存資料夾")
@@ -378,9 +382,9 @@ class PDFToolApp:
                         if self.stop_event.is_set(): break
                         base = os.path.splitext(os.path.basename(file))[0]
                         self.update_status(f"🔄 批次處理中 ({idx+1}/{len(files)}): {base}", idx/len(files))
-                        process_pdf_to_ppt(file, os.path.join(output_data, base + ".pptx"), dpi=extra["dpi"], **kwargs)
+                        process_pdf_to_ppt(file, os.path.join(output_data, base + ".pptx"), dpi=extra["dpi"], ppt_mode=extra["ppt_mode"], **kwargs)
                 else:
-                    process_pdf_to_ppt(input_data[0], output_data, dpi=extra["dpi"], **kwargs)
+                    process_pdf_to_ppt(input_data[0], output_data, dpi=extra["dpi"], ppt_mode=extra["ppt_mode"], **kwargs)
 
             if self.stop_event.is_set(): self.update_status("⛔ 任務已取消", 0)
             else:
