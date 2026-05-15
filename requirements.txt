@@ -9,3 +9,4 @@ pillow
 docx2pdf
 pywin32
 rapidocr_onnxruntime
+opencc-python-reimplemented
