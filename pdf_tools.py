@@ -54,11 +54,55 @@ def process_pdf_to_images(input_file, output_dir, status_callback, stop_event, d
         page_img.save(os.path.join(output_dir, f"{base_name}_{i}.jpg"), 'JPEG')
         del page_img; gc.collect()
 
+def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi=300):
+    """ 純圖片轉 PPT (不包含文字辨識，保證不跑版) """
+    poppler = get_poppler_path()
+    is_pdf = input_file.lower().endswith('.pdf')
+    temp_dir = tempfile.mkdtemp()
+    
+    try:
+        prs = Presentation()
+        if is_pdf:
+            info = pdfinfo_from_path(input_file, poppler_path=poppler)
+            total = info["Pages"]
+            for i in range(1, total + 1):
+                if stop_event.is_set(): break
+                status_callback(f"🖼️ 正在轉換圖片並寫入 PPT (第 {i} / {total} 頁)...", i/total)
+                page_img = convert_from_path(input_file, dpi=dpi, first_page=i, last_page=i, poppler_path=poppler)[0]
+                
+                temp_path = os.path.join(temp_dir, f"page_{i}.jpg")
+                page_img.save(temp_path, "JPEG", quality=95)
+                
+                # 以第一頁的尺寸作為 PPT 的投影片尺寸
+                if i == 1:
+                    prs.slide_width = int(page_img.width * 914400 / dpi)
+                    prs.slide_height = int(page_img.height * 914400 / dpi)
+                    
+                slide = prs.slides.add_slide(prs.slide_layouts[6])
+                slide.shapes.add_picture(temp_path, 0, 0, prs.slide_width, prs.slide_height)
+                del page_img; gc.collect()
+        else:
+            status_callback("🖼️ 正在處理圖片檔案...", 0.5)
+            from PIL import Image
+            page_img = Image.open(input_file).convert('RGB')
+            temp_path = os.path.join(temp_dir, "page.jpg")
+            page_img.save(temp_path, "JPEG", quality=95)
+            
+            prs.slide_width = int(page_img.width * 914400 / dpi)
+            prs.slide_height = int(page_img.height * 914400 / dpi)
+            slide = prs.slides.add_slide(prs.slide_layouts[6])
+            slide.shapes.add_picture(temp_path, 0, 0, prs.slide_width, prs.slide_height)
+            
+        if not stop_event.is_set():
+            status_callback("💾 正在儲存 PPT 檔案...", 0.95)
+            prs.save(output_path)
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
 def process_remove_watermark(input_file, output_path, status_callback, stop_event, dpi=300):
     poppler = get_poppler_path()
     info = pdfinfo_from_path(input_file, poppler_path=poppler)
     total = info["Pages"]
-    
     temp_dir = tempfile.mkdtemp()
     temp_images = []
     
