@@ -4,17 +4,17 @@ on:
   workflow_dispatch:
     inputs:
       version_name:
-        description: '版本名稱 (例如: v2.1.0)'
+        description: '版本名稱 (例如: v2.2.0)'
         required: true
-        default: 'v2.1.0'
+        default: 'v2.2.0'
       build_mode:
         description: '選擇打包模式'
         required: true
         type: choice
         options:
-          - Full (完整打包 - 含模型與所有函式庫)
+          - Full (完整打包 - 含 Poppler 引擎與所有函式庫)
           - Lite (輕量更新 - 僅主程式 exe)
-        default: 'Full (完整打包 - 含模型與所有函式庫)'
+        default: 'Full (完整打包 - 含 Poppler 引擎與所有函式庫)'
 
 permissions:
   contents: write
@@ -42,32 +42,20 @@ jobs:
       run: choco install upx
 
     # ==========================================
-    # 只有選擇「Full (完整打包)」時，才執行下載模型與 Poppler
+    # 只有選擇「Full」時，才執行下載 Poppler
+    # (已移除 EasyOCR 模型下載)
     # ==========================================
-    - name: Download and Prep Poppler & EasyOCR Models
-      if: github.event.inputs.build_mode == 'Full (完整打包 - 含模型與所有函式庫)'
+    - name: Download and Prep Poppler
+      if: github.event.inputs.build_mode == 'Full (完整打包 - 含 Poppler 引擎與所有函式庫)'
       shell: pwsh
       env:
         PYTHONIOENCODING: "utf8"
       run: |
-        # 下載 Poppler
+        # 下載 Poppler 渲染引擎
         Invoke-WebRequest -Uri "https://github.com/oschwartz10612/poppler-windows/releases/download/v24.02.0-0/Release-24.02.0-0.zip" -OutFile "poppler.zip"
         Expand-Archive -Path "poppler.zip" -DestinationPath "poppler_temp"
         New-Item -ItemType Directory -Path "Library/poppler_bin" -Force
         Copy-Item -Path "poppler_temp/poppler-24.02.0/Library/bin/*" -Destination "Library/poppler_bin" -Recurse
-
-        # 下載 EasyOCR 模型
-        @"
-        import easyocr
-        import shutil
-        import os
-        easyocr.Reader(['ch_tra', 'en'])
-        src = os.path.join(os.path.expanduser('~'), '.EasyOCR', 'model')
-        dst = 'Library/model'
-        shutil.copytree(src, dst, dirs_exist_ok=True)
-        "@ > download_models.py
-        
-        python download_models.py
 
     # ==========================================
     # 根據選擇的模式執行 PyInstaller
@@ -77,16 +65,16 @@ jobs:
       run: |
         $MODE = "${{ github.event.inputs.build_mode }}"
         
-        if ($MODE -eq 'Full (完整打包 - 含模型與所有函式庫)') {
+        # 強制排除機器學習與其他肥大模組，確保檔案最小化
+        $EXCLUDES = "--exclude-module matplotlib --exclude-module IPython --exclude-module pytest --exclude-module torch --exclude-module torchvision --exclude-module easyocr"
+        
+        if ($MODE -eq 'Full (完整打包 - 含 Poppler 引擎與所有函式庫)') {
             pyinstaller --noconfirm --onedir --noconsole `
               --contents-directory "Library" `
               --add-data "Library/poppler_bin;Library/poppler_bin" `
-              --add-data "Library/model;Library/model" `
               --collect-all tkinterdnd2 `
               --collect-all customtkinter `
-              --exclude-module matplotlib `
-              --exclude-module IPython `
-              --exclude-module pytest `
+              $EXCLUDES.Split(" ") `
               --upx-exclude "*.dll" `
               --upx-exclude "*.pyd" `
               --name "PDFconversion" `
@@ -97,9 +85,7 @@ jobs:
               --contents-directory "Library" `
               --collect-all tkinterdnd2 `
               --collect-all customtkinter `
-              --exclude-module matplotlib `
-              --exclude-module IPython `
-              --exclude-module pytest `
+              $EXCLUDES.Split(" ") `
               --upx-exclude "*.dll" `
               --upx-exclude "*.pyd" `
               --name "PDFconversion" `
@@ -115,10 +101,10 @@ jobs:
         $VERSION = "${{ github.event.inputs.version_name }}"
         $MODE = "${{ github.event.inputs.build_mode }}"
         
-        if ($MODE -eq 'Full (完整打包 - 含模型與所有函式庫)') {
+        if ($MODE -eq 'Full (完整打包 - 含 Poppler 引擎與所有函式庫)') {
             Compress-Archive -Path dist/PDFconversion/* -DestinationPath "PDFconversion_Full_$VERSION.zip"
         } else {
-            # 輕量模式：只壓縮瘦身後的主程式 (通常小於 10MB)
+            # 輕量模式：只壓縮瘦身後的主程式
             Compress-Archive -Path dist/PDFconversion/PDFconversion.exe -DestinationPath "PDFconversion_Lite_$VERSION.zip"
         }
 
