@@ -30,7 +30,6 @@ def set_dpi_awareness():
         except Exception:
             pass
 
-# 整合 TkinterDnD 與 CustomTkinter
 class CTkinterDnD(ctk.CTk, TkinterDnD.DnDWrapper):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -42,21 +41,21 @@ class PDFToolApp:
         self.root.title("PDFconversion - 現代化多功能工具")
         self.root.geometry("750x550")
         
-        # 設定 CustomTkinter 主題
-        ctk.set_appearance_mode("dark")  
+        # ====== UI 顏色調整為明亮主題 (白底) ======
+        ctk.set_appearance_mode("light")  
         ctk.set_default_color_theme("blue")  
 
         self.mode_var = ctk.StringVar(value="PPT")
 
         # 頂部標題
-        title_label = ctk.CTkLabel(self.root, text="PDFconversion 工具集", font=("Microsoft JhengHei", 24, "bold"))
+        title_label = ctk.CTkLabel(self.root, text="PDFconversion 工具集", font=("Microsoft JhengHei", 24, "bold"), text_color="#333333")
         title_label.pack(pady=(20, 10))
 
         # 功能選擇區塊
-        mode_frame = ctk.CTkFrame(self.root)
+        mode_frame = ctk.CTkFrame(self.root, fg_color="transparent")
         mode_frame.pack(fill="x", padx=30, pady=10)
 
-        ctk.CTkLabel(mode_frame, text="請選擇功能：", font=("Microsoft JhengHei", 14, "bold")).grid(row=0, column=0, padx=10, pady=10)
+        ctk.CTkLabel(mode_frame, text="請選擇功能：", font=("Microsoft JhengHei", 14, "bold"), text_color="#333333").grid(row=0, column=0, padx=10, pady=10)
         
         modes = [
             ("OCR 轉 PPT", "PPT"),
@@ -68,12 +67,12 @@ class PDFToolApp:
         
         col = 1
         for text, val in modes:
-            rb = ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 13))
+            rb = ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 13), text_color="#333333")
             rb.grid(row=0, column=col, padx=10, pady=10)
             col += 1
 
-        # 拖曳放置區塊
-        self.drop_frame = ctk.CTkFrame(self.root, fg_color="#2b2b2b", border_width=2, border_color="#1f538d", corner_radius=15)
+        # 拖曳放置區塊 (調整為淺色背景與深色邊框)
+        self.drop_frame = ctk.CTkFrame(self.root, fg_color="#f9f9f9", border_width=2, border_color="#3a7ebf", corner_radius=15)
         self.drop_frame.pack(expand=True, fill="both", padx=30, pady=(10, 30))
         
         self.status_label = ctk.CTkLabel(
@@ -81,11 +80,10 @@ class PDFToolApp:
             text="📁 將檔案拖曳至此\n或\n點擊這裡選擇檔案\n\n支援 PDF 與 圖片(JPG/PNG)\n支援批次處理多個檔案", 
             font=("Microsoft JhengHei", 16, "bold"),
             justify="center",
-            text_color="#a1a1a1"
+            text_color="#555555" # 深灰色文字，白底上更易讀
         )
         self.status_label.pack(expand=True)
         
-        # 綁定事件
         self.drop_frame.bind("<Button-1>", lambda e: self.browse_file())
         self.status_label.bind("<Button-1>", lambda e: self.browse_file())
         self.root.drop_target_register(DND_FILES)
@@ -114,7 +112,6 @@ class PDFToolApp:
             messagebox.showerror("錯誤", "請提供有效的檔案！")
             return
 
-        # 取得原檔名作為預設檔名
         first_file_name = os.path.splitext(os.path.basename(valid_files[0]))[0]
 
         if mode == "MERGE":
@@ -131,7 +128,6 @@ class PDFToolApp:
                 self.start_thread(mode, valid_files[0], output_dir, None)
 
         elif mode == "PROTECT":
-            # 簡單使用 dialog 取得密碼
             dialog = ctk.CTkInputDialog(text="請輸入要設定的 PDF 密碼：", title="加密 PDF")
             pwd = dialog.get_input()
             if pwd:
@@ -140,7 +136,6 @@ class PDFToolApp:
                     self.start_thread(mode, valid_files[0], output_path, pwd)
 
         elif mode in ["PPT", "WORD"]:
-            # 批次處理邏輯 (Batch Processing)
             if len(valid_files) == 1:
                 ext = ".pptx" if mode == "PPT" else ".docx"
                 ftype = [("PowerPoint", "*.pptx")] if mode == "PPT" else [("Word", "*.docx")]
@@ -148,7 +143,6 @@ class PDFToolApp:
                 if output_path:
                     self.start_thread(mode, valid_files, output_path, None)
             else:
-                # 批次處理：選擇輸出資料夾
                 output_dir = filedialog.askdirectory(title="選擇批次轉檔的儲存資料夾")
                 if output_dir:
                     self.start_thread(mode, valid_files, output_dir, "BATCH")
@@ -158,7 +152,7 @@ class PDFToolApp:
         threading.Thread(target=self.run_task_router, args=(mode, input_data, output_data, extra_param), daemon=True).start()
 
     def set_ui_state(self, state):
-        color = "#1f538d" if state != "disabled" else "#444444"
+        color = "#3a7ebf" if state != "disabled" else "#cccccc"
         self.drop_frame.configure(border_color=color)
         
         if state == "disabled":
@@ -184,7 +178,6 @@ class PDFToolApp:
             
             elif mode in ["PPT", "WORD"]:
                 if extra_param == "BATCH":
-                    # 執行批次處理
                     total = len(input_data)
                     ext = ".pptx" if mode == "PPT" else ".docx"
                     for idx, file in enumerate(input_data):
@@ -194,7 +187,6 @@ class PDFToolApp:
                         if mode == "PPT": process_ocr_to_ppt(file, out_path, self.update_status)
                         else: process_ocr_to_word(file, out_path, self.update_status)
                 else:
-                    # 單檔處理
                     if mode == "PPT": process_ocr_to_ppt(input_data[0], output_data, self.update_status)
                     else: process_ocr_to_word(input_data[0], output_data, self.update_status)
 
