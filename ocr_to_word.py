@@ -9,9 +9,9 @@ from PIL import Image
 def process_ocr_to_word(input_file, output_path, status_callback):
     status_callback("⏳ 正在初始化 OCR 模型 (本地離線模式)...")
     
-    # 載入離線模型，避免 Proxy 錯誤
+    # 載入離線模型，修正為繁英雙語避免衝突
     model_path = get_model_path()
-    reader = easyocr.Reader(['ch_tra', 'ch_sim', 'en'], 
+    reader = easyocr.Reader(['ch_tra', 'en'], 
                             model_storage_directory=model_path, 
                             download_enabled=False)
     
