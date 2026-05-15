@@ -3,6 +3,7 @@ import easyocr
 from pdf2image import convert_from_path
 from pptx import Presentation
 from pptx.util import Pt
+from pptx.dml.color import RGBColor
 from utils import get_poppler_path, get_model_path
 from PIL import Image
 
@@ -31,7 +32,7 @@ def process_ocr_to_ppt(input_file, output_path, status_callback):
     slide_height = prs.slide_height
 
     for i, page_img in enumerate(pages):
-        status_callback(f"🔍 正在辨識第 {i+1} / {total_pages} 頁 (版面與字體還原中)...")
+        status_callback(f"🔍 正在辨識第 {i+1} / {total_pages} 頁 (保留原圖背景與文字還原中)...")
         img_width, img_height = page_img.size
         
         temp_img = f"temp_page_{i}.jpg"
@@ -39,6 +40,10 @@ def process_ocr_to_ppt(input_file, output_path, status_callback):
         
         result = reader.readtext(temp_img)
         slide = prs.slides.add_slide(prs.slide_layouts[6]) # 使用空白投影片
+        
+        # 【全新功能：將原本的頁面截圖當作 PPT 的最底層背景】
+        # 因為是最先加入的物件，所以它會自動在最底層，不會蓋住後續生成的文字
+        slide.shapes.add_picture(temp_img, 0, 0, width=slide_width, height=slide_height)
         
         for (bbox, text, prob) in result:
             x_tl, y_tl = bbox[0]
@@ -50,8 +55,17 @@ def process_ocr_to_ppt(input_file, output_path, status_callback):
             width = int(((x_br - x_tl) / img_width) * slide_width)
             height = int(((y_br - y_tl) / img_height) * slide_height)
             
-            # 建立文字方塊
+            # 建立文字方塊 (會疊加在背景圖上面)
             txBox = slide.shapes.add_textbox(left, top, width, height)
+            
+            # --- 💡 進階選項 ---
+            # 如果你覺得疊加在背景上原本的字看起來會重疊/模糊，
+            # 你可以解除下面三行的註解，這會為文字方塊加上「白色不透明底色」來蓋掉底圖原本的字
+            # fill = txBox.fill
+            # fill.solid()
+            # fill.fore_color.rgb = RGBColor(255, 255, 255)
+            # --------------------
+
             tf = txBox.text_frame
             tf.word_wrap = True
             
@@ -65,9 +79,7 @@ def process_ocr_to_ppt(input_file, output_path, status_callback):
             p.text = text
             
             # 【優化 2】根據 Bounding Box 高度動態估算字體大小
-            # PPT 的高度單位是 EMU，1 Pt = 12700 EMU。乘上 0.7 是扣除行距與空白邊界
-            estimated_pt = (height / 12700) * 0.7 
-            # 限制字體大小在合理範圍內 (最小 8pt，最大 96pt)
+            estimated_pt = (height / 12700) * 0.75 
             estimated_pt = max(8, min(int(estimated_pt), 96))
             p.font.size = Pt(estimated_pt)
             
