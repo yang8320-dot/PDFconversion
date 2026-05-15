@@ -12,24 +12,19 @@ def process_merge_pdfs(input_files, output_path, status_callback, stop_event):
     import sys
     import io
     
-    # 必須初始化 COM，否則在 Thread 裡面背景呼叫 MS Word 會崩潰
     pythoncom.CoInitialize()
-    
     try:
         merger = PdfWriter()
         total = len(input_files)
-        
         with tempfile.TemporaryDirectory() as temp_dir:
             for i, file_path in enumerate(input_files):
                 if stop_event.is_set(): return
                 base_name = os.path.basename(file_path)
                 status_callback(f"📑 處理合併: {base_name} ({i+1}/{total})", (i+1)/total)
-                
                 ext = file_path.lower().split('.')[-1]
                 
                 if ext == 'pdf':
                     merger.append(file_path)
-                    
                 elif ext in ['jpg', 'jpeg', 'png', 'bmp']:
                     img_doc = fitz.open(file_path)
                     pdf_bytes = img_doc.convert_to_pdf()
@@ -38,23 +33,18 @@ def process_merge_pdfs(input_files, output_path, status_callback, stop_event):
                     img_pdf.save(temp_pdf)
                     img_pdf.close(); img_doc.close()
                     merger.append(temp_pdf)
-                    
                 elif ext in ['docx', 'doc']:
                     from docx2pdf import convert
                     temp_pdf = os.path.join(temp_dir, f"temp_{i}.pdf")
-                    
-                    # 攔截 docx2pdf 產生的終端機進度條輸出，防止 --noconsole 打包模式崩潰
                     dummy_out = io.StringIO()
                     old_out, old_err = sys.stdout, sys.stderr
                     sys.stdout, sys.stderr = dummy_out, dummy_out
-                    
                     try:
                         convert(file_path, temp_pdf)
                         merger.append(temp_pdf)
                     except Exception as e:
                         raise Exception(f"Word 轉換失敗 ({base_name})\n1. 請確認電腦有安裝 Microsoft Word。\n2. 請確認沒有開啟對話框卡住 Word。\n錯誤細節: {e}")
                     finally:
-                        # 轉換完畢後恢復標準輸出
                         sys.stdout, sys.stderr = old_out, old_err
                 else:
                     raise Exception(f"不支援的檔案格式: {ext}")
@@ -364,8 +354,6 @@ def process_remove_watermark(input_file, output_path, status_callback, stop_even
             doc.save(output_path)
             doc.close()
 
-# --- 各式轉檔 ---
-
 def process_pdf_to_images(input_file, output_dir, status_callback, stop_event, dpi=300):
     from pdf2image import convert_from_path, pdfinfo_from_path
     poppler = get_poppler_path()
@@ -379,39 +367,218 @@ def process_pdf_to_images(input_file, output_dir, status_callback, stop_event, d
         page_img.save(os.path.join(output_dir, f"{base_name}_{i}.jpg"), 'JPEG')
         del page_img; gc.collect()
 
-def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi=300):
+# --- 高精度 PDF 轉 PPT (雙軌辨識) ---
+
+def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi=300, ppt_mode="圖文排版 (智慧 OCR)"):
     from pptx import Presentation
-    from pdf2image import convert_from_path, pdfinfo_from_path
-    poppler = get_poppler_path()
-    is_pdf = input_file.lower().endswith('.pdf')
+    from pptx.util import Pt
+    import fitz
+    from PIL import Image, ImageDraw
+    import tempfile
+    import os
+    from collections import Counter
     
+    is_pdf = input_file.lower().endswith('.pdf')
+    prs = Presentation()
+    blank_slide_layout = prs.slide_layouts[6] 
+    
+    # 內部函數：動態採樣背景色
+    def get_dynamic_bg_color(img_obj, px_bbox):
+        w, h = img_obj.size
+        x0, y0, x1, y1 = [int(v) for v in px_bbox]
+        samples = []
+        offsets = [
+            (x0 - 4, y0 - 4), (x0 + (x1-x0)//2, y0 - 4), (x1 + 4, y0 - 4),
+            (x0 - 4, y1 + 4), (x0 + (x1-x0)//2, y1 + 4), (x1 + 4, y1 + 4),
+            (x0 - 4, y0 + (y1-y0)//2), (x1 + 4, y0 + (y1-y0)//2)
+        ]
+        for sx, sy in offsets:
+            sx = max(0, min(w - 1, sx))
+            sy = max(0, min(h - 1, sy))
+            pixel = img_obj.getpixel((sx, sy))
+            if isinstance(pixel, int): pixel = (pixel, pixel, pixel)
+            samples.append(pixel[:3]) 
+        return Counter(samples).most_common(1)[0][0] if samples else (255, 255, 255)
+
+    # 若非純圖片模式，初始化 OCR 引擎
+    ocr_engine = None
+    if ppt_mode == "圖文排版 (智慧 OCR)":
+        from rapidocr_onnxruntime import RapidOCR
+        from utils import get_model_path
+        model_dir = get_model_path()
+        det_path = os.path.join(model_dir, "ch_PP-OCRv4_det_infer.onnx")
+        cls_path = os.path.join(model_dir, "ch_ppocr_mobile_v2.0_cls_infer.onnx")
+        rec_path = os.path.join(model_dir, "ch_PP-OCRv4_rec_infer.onnx")
+        if os.path.exists(det_path): ocr_engine = RapidOCR(det_model_path=det_path, cls_model_path=cls_path, rec_model_path=rec_path)
+        else: ocr_engine = RapidOCR()
+
     with tempfile.TemporaryDirectory() as temp_dir:
-        prs = Presentation()
         if is_pdf:
-            info = pdfinfo_from_path(input_file, poppler_path=poppler)
-            total = info["Pages"]
-            for i in range(1, total + 1):
+            doc = fitz.open(input_file)
+            total = len(doc)
+            
+            for i in range(total):
                 if stop_event.is_set(): break
-                status_callback(f"🖼️ 正在轉換圖片並寫入 PPT (第 {i} / {total} 頁)...", i/total)
-                page_img = convert_from_path(input_file, dpi=dpi, first_page=i, last_page=i, poppler_path=poppler)[0]
-                temp_path = os.path.join(temp_dir, f"page_{i}.jpg")
-                page_img.save(temp_path, "JPEG", quality=95)
-                if i == 1:
-                    prs.slide_width = int(page_img.width * 914400 / dpi)
-                    prs.slide_height = int(page_img.height * 914400 / dpi)
-                slide = prs.slides.add_slide(prs.slide_layouts[6])
-                slide.shapes.add_picture(temp_path, 0, 0, prs.slide_width, prs.slide_height)
-                del page_img; gc.collect()
+                
+                page = doc[i]
+                if i == 0:
+                    prs.slide_width = Pt(page.rect.width)
+                    prs.slide_height = Pt(page.rect.height)
+                
+                slide = prs.slides.add_slide(blank_slide_layout)
+                img_path = os.path.join(temp_dir, f"bg_{i}.jpg")
+                
+                # --- 分支 1：純圖片簡報 (不辨識文字) ---
+                if ppt_mode == "純圖片簡報 (較快)":
+                    status_callback(f"📊 正在轉換純圖 PPT (第 {i+1} / {total} 頁)...", (i+1)/total)
+                    pix = page.get_pixmap(dpi=dpi, colorspace=fitz.csRGB)
+                    pix.save(img_path)
+                    slide.shapes.add_picture(img_path, 0, 0, prs.slide_width, prs.slide_height)
+                    continue
+                
+                # --- 分支 2：圖文排版與智慧 OCR ---
+                status_callback(f"📊 高精度轉換與排版 PPT (第 {i+1} / {total} 頁)...", (i+1)/total)
+                text_dict = page.get_text("dict")
+                extracted_text = page.get_text("text").strip()
+                text_boxes_data = []
+
+                if len(extracted_text) > 10:
+                    pix = page.get_pixmap(dpi=dpi, colorspace=fitz.csRGB)
+                    img_obj = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                    draw = ImageDraw.Draw(img_obj)
+                    scale_to_px = dpi / 72
+                    
+                    for block in text_dict.get("blocks", []):
+                        if block.get("type") == 0: 
+                            for line in block.get("lines", []):
+                                for span in line.get("spans", []):
+                                    text = span.get("text", "").strip()
+                                    if not text: continue
+                                    bbox = span["bbox"] 
+                                    text_boxes_data.append({"text": text, "bbox": bbox, "size": span.get("size", 12)})
+                                    
+                                    px_bbox = [v * scale_to_px for v in bbox]
+                                    bg_color = get_dynamic_bg_color(img_obj, px_bbox)
+                                    draw.rectangle([px_bbox[0]-2, px_bbox[1]-2, px_bbox[2]+2, px_bbox[3]+2], fill=bg_color)
+                    
+                    img_obj.save(img_path, "JPEG", quality=95)
+                    slide.shapes.add_picture(img_path, 0, 0, prs.slide_width, prs.slide_height)
+                    
+                    for item in text_boxes_data:
+                        x0, y0, x1, y1 = item["bbox"]
+                        txBox = slide.shapes.add_textbox(Pt(x0), Pt(y0), Pt(x1 - x0), Pt(y1 - y0))
+                        tf = txBox.text_frame
+                        tf.clear()
+                        tf.word_wrap = False
+                        p = tf.paragraphs[0]
+                        run = p.add_run()
+                        run.text = item["text"]
+                        run.font.size = Pt(item["size"])
+
+                else:
+                    status_callback(f"👁️ 啟動 OCR 進行智慧辨識 (第 {i+1} 頁)...", (i+1)/total)
+                    pix = page.get_pixmap(dpi=dpi, colorspace=fitz.csRGB)
+                    pix.save(img_path)
+                    
+                    result, _ = ocr_engine(img_path)
+                    if result:
+                        img_obj = Image.open(img_path).convert("RGB")
+                        draw = ImageDraw.Draw(img_obj)
+                        scale = 72 / dpi
+                        
+                        for box_info in result:
+                            box = box_info[0]
+                            text = box_info[1]
+                            
+                            x_coords = [p[0] for p in box]
+                            y_coords = [p[1] for p in box]
+                            px_bbox = (min(x_coords), min(y_coords), max(x_coords), max(y_coords))
+                            bg_color = get_dynamic_bg_color(img_obj, px_bbox)
+                            
+                            points = [tuple(p) for p in box]
+                            draw.polygon(points, fill=bg_color)
+                            points.append(points[0]) 
+                            draw.line(points, fill=bg_color, width=4)
+                            
+                            px0 = min(x_coords) * scale
+                            py0 = min(y_coords) * scale
+                            pw = (max(x_coords) - min(x_coords)) * scale
+                            ph = (max(y_coords) - min(y_coords)) * scale
+                            text_boxes_data.append({"text": text, "x": px0, "y": py0, "w": pw, "h": ph})
+                            
+                        img_obj.save(img_path, "JPEG", quality=95)
+                        slide.shapes.add_picture(img_path, 0, 0, prs.slide_width, prs.slide_height)
+                        
+                        for item in text_boxes_data:
+                            txBox = slide.shapes.add_textbox(Pt(item["x"]), Pt(item["y"]), Pt(item["w"]), Pt(item["h"]))
+                            tf = txBox.text_frame
+                            tf.clear()
+                            tf.word_wrap = False
+                            p = tf.paragraphs[0]
+                            run = p.add_run()
+                            run.text = item["text"]
+                            run.font.size = Pt(max(8, item["h"] * 0.75))
+                    else:
+                        slide.shapes.add_picture(img_path, 0, 0, prs.slide_width, prs.slide_height)
+
+            doc.close()
+            
         else:
-            status_callback("🖼️ 正在處理圖片檔案...", 0.5)
-            from PIL import Image
-            page_img = Image.open(input_file).convert('RGB')
-            temp_path = os.path.join(temp_dir, "page.jpg")
-            page_img.save(temp_path, "JPEG", quality=95)
-            prs.slide_width = int(page_img.width * 914400 / dpi)
-            prs.slide_height = int(page_img.height * 914400 / dpi)
-            slide = prs.slides.add_slide(prs.slide_layouts[6])
-            slide.shapes.add_picture(temp_path, 0, 0, prs.slide_width, prs.slide_height)
+            # 處理單圖轉 PPT
+            img = Image.open(input_file).convert('RGB')
+            img_path = os.path.join(temp_dir, "page.jpg")
+            img.save(img_path, "JPEG", quality=95)
+            
+            prs.slide_width = Pt(img.width * 72 / dpi)
+            prs.slide_height = Pt(img.height * 72 / dpi)
+            slide = prs.slides.add_slide(blank_slide_layout)
+
+            if ppt_mode == "純圖片簡報 (較快)":
+                status_callback("🖼️ 正在處理圖片檔案...", 0.5)
+                slide.shapes.add_picture(img_path, 0, 0, prs.slide_width, prs.slide_height)
+            else:
+                status_callback("👁️ 正在對圖片進行 OCR 辨識與排版...", 0.5)
+                result, _ = ocr_engine(img_path)
+                if result:
+                    draw = ImageDraw.Draw(img)
+                    scale = 72 / dpi
+                    text_boxes_data = []
+                    
+                    for box_info in result:
+                        box = box_info[0]
+                        text = box_info[1]
+                        
+                        x_coords = [p[0] for p in box]
+                        y_coords = [p[1] for p in box]
+                        px_bbox = (min(x_coords), min(y_coords), max(x_coords), max(y_coords))
+                        bg_color = get_dynamic_bg_color(img, px_bbox)
+                        
+                        points = [tuple(p) for p in box]
+                        draw.polygon(points, fill=bg_color)
+                        points.append(points[0])
+                        draw.line(points, fill=bg_color, width=4)
+                        
+                        px0 = min(x_coords) * scale
+                        py0 = min(y_coords) * scale
+                        pw = (max(x_coords) - min(x_coords)) * scale
+                        ph = (max(y_coords) - min(y_coords)) * scale
+                        text_boxes_data.append({"text": text, "x": px0, "y": py0, "w": pw, "h": ph})
+                        
+                    img.save(img_path, "JPEG", quality=95)
+                    slide.shapes.add_picture(img_path, 0, 0, prs.slide_width, prs.slide_height)
+                    
+                    for item in text_boxes_data:
+                        txBox = slide.shapes.add_textbox(Pt(item["x"]), Pt(item["y"]), Pt(item["w"]), Pt(item["h"]))
+                        tf = txBox.text_frame
+                        tf.clear()
+                        tf.word_wrap = False
+                        p = tf.paragraphs[0]
+                        run = p.add_run()
+                        run.text = item["text"]
+                        run.font.size = Pt(max(8, item["h"] * 0.75))
+                else:
+                    slide.shapes.add_picture(img_path, 0, 0, prs.slide_width, prs.slide_height)
+        
         if not stop_event.is_set():
-            status_callback("💾 正在儲存 PPT 檔案...", 0.95)
+            status_callback("💾 正在儲存檔案...", 0.95)
             prs.save(output_path)
