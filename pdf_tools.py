@@ -377,20 +377,46 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
     import tempfile
     import os
     from collections import Counter
+    import opencc # 引入簡繁轉換套件
     
+    # 建立 s2twp 轉換器：簡體轉台灣繁體(包含常用慣用語)
+    converter = opencc.OpenCC('s2twp.json')
+
     is_pdf = input_file.lower().endswith('.pdf')
     prs = Presentation()
     blank_slide_layout = prs.slide_layouts[6] 
     
-    # 內部函數：動態採樣背景色
+    def expand_bbox(x0, y0, x1, y1, scale=1.1, max_w=9999, max_h=9999):
+        """以中心點為基準，等比例向外擴張 BBox，確保能完美蓋住文字毛邊"""
+        cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+        w, h = (x1 - x0) * scale, (y1 - y0) * scale
+        new_x0 = max(0, cx - w / 2)
+        new_y0 = max(0, cy - h / 2)
+        new_x1 = min(max_w, cx + w / 2)
+        new_y1 = min(max_h, cy + h / 2)
+        return [new_x0, new_y0, new_x1, new_y1]
+
+    def expand_polygon(points, scale=1.1):
+        """以多邊形重心為基準，將頂點向外擴張，應用於 OCR 不規則四邊形"""
+        if not points: return points
+        cx = sum(p[0] for p in points) / len(points)
+        cy = sum(p[1] for p in points) / len(points)
+        expanded = []
+        for p in points:
+            nx = cx + (p[0] - cx) * scale
+            ny = cy + (p[1] - cy) * scale
+            expanded.append((nx, ny))
+        return expanded
+
     def get_dynamic_bg_color(img_obj, px_bbox):
         w, h = img_obj.size
         x0, y0, x1, y1 = [int(v) for v in px_bbox]
         samples = []
+        # 在擴張後的區域再向外採樣
         offsets = [
-            (x0 - 4, y0 - 4), (x0 + (x1-x0)//2, y0 - 4), (x1 + 4, y0 - 4),
-            (x0 - 4, y1 + 4), (x0 + (x1-x0)//2, y1 + 4), (x1 + 4, y1 + 4),
-            (x0 - 4, y0 + (y1-y0)//2), (x1 + 4, y0 + (y1-y0)//2)
+            (x0 - 5, y0 - 5), (x0 + (x1-x0)//2, y0 - 5), (x1 + 5, y0 - 5),
+            (x0 - 5, y1 + 5), (x0 + (x1-x0)//2, y1 + 5), (x1 + 5, y1 + 5),
+            (x0 - 5, y0 + (y1-y0)//2), (x1 + 5, y0 + (y1-y0)//2)
         ]
         for sx, sy in offsets:
             sx = max(0, min(w - 1, sx))
@@ -400,7 +426,6 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
             samples.append(pixel[:3]) 
         return Counter(samples).most_common(1)[0][0] if samples else (255, 255, 255)
 
-    # 若非純圖片模式，初始化 OCR 引擎
     ocr_engine = None
     if ppt_mode == "圖文排版 (智慧 OCR)":
         from rapidocr_onnxruntime import RapidOCR
@@ -428,7 +453,6 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
                 slide = prs.slides.add_slide(blank_slide_layout)
                 img_path = os.path.join(temp_dir, f"bg_{i}.jpg")
                 
-                # --- 分支 1：純圖片簡報 (不辨識文字) ---
                 if ppt_mode == "純圖片簡報 (較快)":
                     status_callback(f"📊 正在轉換純圖 PPT (第 {i+1} / {total} 頁)...", (i+1)/total)
                     pix = page.get_pixmap(dpi=dpi, colorspace=fitz.csRGB)
@@ -436,7 +460,6 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
                     slide.shapes.add_picture(img_path, 0, 0, prs.slide_width, prs.slide_height)
                     continue
                 
-                # --- 分支 2：圖文排版與智慧 OCR ---
                 status_callback(f"📊 高精度轉換與排版 PPT (第 {i+1} / {total} 頁)...", (i+1)/total)
                 text_dict = page.get_text("dict")
                 extracted_text = page.get_text("text").strip()
@@ -454,12 +477,17 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
                                 for span in line.get("spans", []):
                                     text = span.get("text", "").strip()
                                     if not text: continue
+                                    # 開啟強制繁化轉換
+                                    text = converter.convert(text)
+                                    
                                     bbox = span["bbox"] 
                                     text_boxes_data.append({"text": text, "bbox": bbox, "size": span.get("size", 12)})
                                     
                                     px_bbox = [v * scale_to_px for v in bbox]
-                                    bg_color = get_dynamic_bg_color(img_obj, px_bbox)
-                                    draw.rectangle([px_bbox[0]-2, px_bbox[1]-2, px_bbox[2]+2, px_bbox[3]+2], fill=bg_color)
+                                    # 塗抹範圍擴大 110%
+                                    exp_px_bbox = expand_bbox(px_bbox[0], px_bbox[1], px_bbox[2], px_bbox[3], scale=1.1, max_w=img_obj.width, max_h=img_obj.height)
+                                    bg_color = get_dynamic_bg_color(img_obj, exp_px_bbox)
+                                    draw.rectangle(exp_px_bbox, fill=bg_color)
                     
                     img_obj.save(img_path, "JPEG", quality=95)
                     slide.shapes.add_picture(img_path, 0, 0, prs.slide_width, prs.slide_height)
@@ -490,15 +518,23 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
                             box = box_info[0]
                             text = box_info[1]
                             
+                            # 強制將 OCR 辨識結果轉為台灣繁體
+                            text = converter.convert(text)
+                            
                             x_coords = [p[0] for p in box]
                             y_coords = [p[1] for p in box]
                             px_bbox = (min(x_coords), min(y_coords), max(x_coords), max(y_coords))
-                            bg_color = get_dynamic_bg_color(img_obj, px_bbox)
+                            # 擴大 Bbox 用於採樣
+                            exp_px_bbox = expand_bbox(px_bbox[0], px_bbox[1], px_bbox[2], px_bbox[3], scale=1.1, max_w=img_obj.width, max_h=img_obj.height)
+                            bg_color = get_dynamic_bg_color(img_obj, exp_px_bbox)
                             
+                            # 擴大多邊形塗白範圍 110%
                             points = [tuple(p) for p in box]
-                            draw.polygon(points, fill=bg_color)
-                            points.append(points[0]) 
-                            draw.line(points, fill=bg_color, width=4)
+                            exp_points = expand_polygon(points, scale=1.1)
+                            
+                            draw.polygon(exp_points, fill=bg_color)
+                            exp_points.append(exp_points[0]) 
+                            draw.line(exp_points, fill=bg_color, width=4) # 加粗抗邊緣鋸齒
                             
                             px0 = min(x_coords) * scale
                             py0 = min(y_coords) * scale
@@ -524,7 +560,6 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
             doc.close()
             
         else:
-            # 處理單圖轉 PPT
             img = Image.open(input_file).convert('RGB')
             img_path = os.path.join(temp_dir, "page.jpg")
             img.save(img_path, "JPEG", quality=95)
@@ -548,15 +583,20 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
                         box = box_info[0]
                         text = box_info[1]
                         
+                        # 圖片模式也強制繁化
+                        text = converter.convert(text)
+                        
                         x_coords = [p[0] for p in box]
                         y_coords = [p[1] for p in box]
                         px_bbox = (min(x_coords), min(y_coords), max(x_coords), max(y_coords))
-                        bg_color = get_dynamic_bg_color(img, px_bbox)
+                        exp_px_bbox = expand_bbox(px_bbox[0], px_bbox[1], px_bbox[2], px_bbox[3], scale=1.1, max_w=img.width, max_h=img.height)
+                        bg_color = get_dynamic_bg_color(img, exp_px_bbox)
                         
                         points = [tuple(p) for p in box]
-                        draw.polygon(points, fill=bg_color)
-                        points.append(points[0])
-                        draw.line(points, fill=bg_color, width=4)
+                        exp_points = expand_polygon(points, scale=1.1)
+                        draw.polygon(exp_points, fill=bg_color)
+                        exp_points.append(exp_points[0])
+                        draw.line(exp_points, fill=bg_color, width=4)
                         
                         px0 = min(x_coords) * scale
                         py0 = min(y_coords) * scale
