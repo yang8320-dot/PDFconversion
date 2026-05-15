@@ -11,7 +11,8 @@ from pdf_tools import (process_merge_pdfs, process_protect_pdf, process_split_pd
                        process_compress_pdf, process_remove_watermark, process_pdf_to_ppt, 
                        process_images_to_pdf, process_unlock_pdf, process_rotate_pdf, process_add_watermark,
                        process_remove_pages, process_to_grayscale, process_extract_text, process_insert_blank_page,
-                       process_add_page_numbers, process_reorder_pages, process_extract_original_images)
+                       process_add_page_numbers, process_reorder_pages, process_extract_original_images,
+                       process_flatten_pdf, process_add_image_watermark)
 from utils import check_poppler_exists, open_file_or_folder
 
 def check_single_instance():
@@ -26,6 +27,13 @@ def check_single_instance():
 def set_dpi_awareness():
     try: ctypes.windll.shcore.SetProcessDpiAwareness(2)
     except: pass
+
+def check_is_encrypted(file_path):
+    """防呆檢查：確認 PDF 是否被加密"""
+    try:
+        from pypdf import PdfReader
+        return PdfReader(file_path).is_encrypted
+    except: return False
 
 class CTkinterDnD(ctk.CTk, TkinterDnD.DnDWrapper):
     def __init__(self, *args, **kwargs):
@@ -88,7 +96,6 @@ class PDFToolApp:
     def __init__(self, root):
         self.root = root
         self.root.title("PDF 辦公室全能工具箱")
-        # 因應 5x4 排版，將寬度稍微拉寬，確保字體不擁擠
         self.root.geometry("900x420") 
         ctk.set_appearance_mode("light")  
         ctk.set_default_color_theme("blue")  
@@ -99,7 +106,7 @@ class PDFToolApp:
         self.mode_var = ctk.StringVar(value="PPT")
         self.stop_event = threading.Event() 
 
-        # 功能選擇區塊 (5x4 排版)
+        # 功能選擇區塊 (完美 5x4 排版，共 20 個功能)
         mode_frame = ctk.CTkFrame(self.root, fg_color="transparent")
         mode_frame.pack(fill="x", padx=15, pady=(10, 5))
         for i in range(5): mode_frame.grid_columnconfigure(i, weight=1, uniform="col_group")
@@ -109,15 +116,14 @@ class PDFToolApp:
         # Row 2: 頁面管理
         modes2 = [("提取/分割 PDF", "SPLIT"), ("刪除指定頁", "REMOVE_PAGES"), ("插入空白頁", "INSERT_BLANK"), ("重新排序頁", "REORDER"), ("合併 PDF", "MERGE")]
         # Row 3: 內容修改
-        modes3 = [("轉黑白/灰階", "GRAYSCALE"), ("PDF 壓縮", "COMPRESS"), ("PDF 旋轉", "ROTATE"), ("添加頁碼", "ADD_PAGE_NUM"), ("加文字水印", "ADD_WM")]
+        modes3 = [("轉黑白/灰階", "GRAYSCALE"), ("扁平化(防篡改)", "FLATTEN"), ("PDF 壓縮", "COMPRESS"), ("PDF 旋轉", "ROTATE"), ("添加頁碼", "ADD_PAGE_NUM")]
         # Row 4: 進階保全
-        modes4 = [("加密 PDF", "PROTECT"), ("解鎖 PDF", "UNLOCK"), ("去浮水印", "RMWATERMARK"), ("", ""), ("", "")]
+        modes4 = [("加密 PDF", "PROTECT"), ("解鎖 PDF", "UNLOCK"), ("加文字浮水印", "ADD_WM"), ("加圖片浮水印", "IMG_WM"), ("去浮水印", "RMWATERMARK")]
         
         for i, (text, val) in enumerate(modes1): ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 12)).grid(row=0, column=i, padx=2, pady=6, sticky="w")
         for i, (text, val) in enumerate(modes2): ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 12)).grid(row=1, column=i, padx=2, pady=6, sticky="w")
         for i, (text, val) in enumerate(modes3): ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 12)).grid(row=2, column=i, padx=2, pady=6, sticky="w")
-        for i, (text, val) in enumerate(modes4): 
-            if text: ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 12)).grid(row=3, column=i, padx=2, pady=6, sticky="w")
+        for i, (text, val) in enumerate(modes4): ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 12)).grid(row=3, column=i, padx=2, pady=6, sticky="w")
 
         # 進階設定區塊
         self.opt_frame = ctk.CTkFrame(self.root, fg_color="#eef5fa", corner_radius=10)
@@ -130,7 +136,7 @@ class PDFToolApp:
         self.lbl_dpi = ctk.CTkLabel(self.opt_frame, text="⚙️ 畫質:", font=("Microsoft JhengHei", 12, "bold"))
         self.menu_dpi = ctk.CTkOptionMenu(self.opt_frame, variable=self.quality_var, values=["原畫質 (300 DPI)", "高畫質 (200 DPI)", "中畫質 (150 DPI)", "低畫質 (72 DPI)"], width=130)
         
-        self.lbl_wm = ctk.CTkLabel(self.opt_frame, text="📍 浮水印位置:", font=("Microsoft JhengHei", 12, "bold"))
+        self.lbl_wm = ctk.CTkLabel(self.opt_frame, text="📍 位置:", font=("Microsoft JhengHei", 12, "bold"))
         self.menu_wm = ctk.CTkOptionMenu(self.opt_frame, variable=self.wm_pos_var, values=["右下角", "左下角", "右上角", "左上角"], width=100)
 
         self.lbl_rot = ctk.CTkLabel(self.opt_frame, text="🔄 旋轉角度:", font=("Microsoft JhengHei", 12, "bold"))
@@ -159,9 +165,9 @@ class PDFToolApp:
     def update_options_ui(self, *args):
         for widget in self.opt_frame.winfo_children(): widget.pack_forget()
         mode = self.mode_var.get()
-        if mode in ["PPT", "PDF2IMG", "RMWATERMARK", "GRAYSCALE"]:
+        if mode in ["PPT", "PDF2IMG", "RMWATERMARK", "GRAYSCALE", "FLATTEN"]:
             self.lbl_dpi.pack(side="left", padx=(10, 5), pady=5); self.menu_dpi.pack(side="left", padx=(0, 15))
-        if mode == "RMWATERMARK":
+        if mode in ["RMWATERMARK", "IMG_WM"]:
             self.lbl_wm.pack(side="left", padx=(5, 5), pady=5); self.menu_wm.pack(side="left", padx=(0, 15))
         if mode == "ROTATE":
             self.lbl_rot.pack(side="left", padx=(10, 5), pady=5); self.menu_rot.pack(side="left", padx=(0, 15))
@@ -188,6 +194,12 @@ class PDFToolApp:
 
         first_file = valid_files[0]
         first_file_name = os.path.splitext(os.path.basename(first_file))[0]
+
+        # ------------------ 防呆攔截：檢查是否加密 ------------------
+        if mode != "UNLOCK" and first_file.lower().endswith(".pdf"):
+            if check_is_encrypted(first_file):
+                return messagebox.showwarning("檔案已加密", "⚠️ 此 PDF 受到密碼保護！\n\n請先選擇「解鎖 PDF」功能，輸入密碼將其解密為一般檔案後，再進行其他操作。")
+        # ------------------------------------------------------------
 
         if mode in ["MERGE", "IMG2PDF"]: 
             return ListManagerWindow(self.root, valid_files, mode, lambda sf: self.trigger_list_process(mode, sf, first_file_name))
@@ -228,6 +240,9 @@ class PDFToolApp:
             
         elif mode == "GRAYSCALE":
             output_path = filedialog.asksaveasfilename(title="儲存黑白 PDF", initialfile=f"{first_file_name}_bw.pdf", defaultextension=".pdf")
+            
+        elif mode == "FLATTEN":
+            output_path = filedialog.asksaveasfilename(title="儲存扁平化 PDF", initialfile=f"{first_file_name}_flattened.pdf", defaultextension=".pdf")
 
         elif mode == "PDF2IMG": output_path = filedialog.askdirectory(title="選擇儲存資料夾")
         
@@ -248,6 +263,13 @@ class PDFToolApp:
             if not txt: return
             output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_wm.pdf", defaultextension=".pdf")
             extra_args["text"] = txt
+            
+        elif mode == "IMG_WM":
+            img_path = filedialog.askopenfilename(title="選擇要壓印的圖片 (Logo)", filetypes=[("Images", "*.png;*.jpg;*.jpeg")])
+            if not img_path: return
+            output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_img_wm.pdf", defaultextension=".pdf")
+            extra_args["img_path"] = img_path
+            extra_args["position"] = self.wm_pos_var.get()
             
         elif mode == "ADD_PAGE_NUM":
             output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_pages.pdf", defaultextension=".pdf")
@@ -310,10 +332,12 @@ class PDFToolApp:
             elif mode == "EXTRACT_TXT": process_extract_text(input_data[0], output_data, **kwargs)
             elif mode == "EXTRACT_IMGS": result_msg = process_extract_original_images(input_data[0], output_data, **kwargs)
             elif mode == "GRAYSCALE": process_to_grayscale(input_data[0], output_data, dpi=extra["dpi"], **kwargs)
+            elif mode == "FLATTEN": process_flatten_pdf(input_data[0], output_data, dpi=extra["dpi"], **kwargs)
             elif mode == "PROTECT": process_protect_pdf(input_data[0], output_data, extra["pwd"], **kwargs)
             elif mode == "UNLOCK": process_unlock_pdf(input_data[0], output_data, extra["pwd"], **kwargs)
             elif mode == "ROTATE": process_rotate_pdf(input_data[0], output_data, extra["angle"], **kwargs)
             elif mode == "ADD_WM": process_add_watermark(input_data[0], output_data, extra["text"], **kwargs)
+            elif mode == "IMG_WM": process_add_image_watermark(input_data[0], output_data, extra["img_path"], extra["position"], **kwargs)
             elif mode == "ADD_PAGE_NUM": process_add_page_numbers(input_data[0], output_data, **kwargs)
             elif mode == "PDF2IMG": process_pdf_to_images(input_data[0], output_data, dpi=extra["dpi"], **kwargs)
             elif mode == "COMPRESS": result_msg = process_compress_pdf(input_data[0], output_data, **kwargs)
