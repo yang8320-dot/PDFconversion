@@ -5,12 +5,21 @@ from pdf2image import convert_from_path
 from utils import get_poppler_path
 
 def process_merge_pdfs(input_files, output_path, status_callback, stop_event):
+    """
+    合併多個 PDF 檔案，並明確保留原有的書籤 (Bookmarks/Outlines)
+    """
     merger = PdfWriter()
     total = len(input_files)
+    
     for i, pdf in enumerate(input_files):
         if stop_event.is_set(): return
+        
+        # 更新狀態與進度條
         status_callback(f"📑 正在合併 PDF... ({i+1}/{total})", (i+1)/total)
-        merger.append(pdf)
+        
+        # append 預設行為已支援書籤匯入，但明確指定 import_outline=True 以確保標籤完整保留
+        merger.append(pdf, import_outline=True) 
+        
     merger.write(output_path)
     merger.close()
 
