@@ -39,19 +39,23 @@ jobs:
         New-Item -ItemType Directory -Path "Library/poppler_bin" -Force
         Copy-Item -Path "poppler_temp/poppler-24.02.0/Library/bin/*" -Destination "Library/poppler_bin" -Recurse
 
-        # 2. 準備 EasyOCR 離線模型 (解決 407 Proxy Error)
-        New-Item -ItemType Directory -Path "Library/model" -Force
-        $models = @(
-            "https://github.com/JaidedAI/EasyOCR/releases/download/v1.3/craft_mlt_25k.zip",
-            "https://github.com/JaidedAI/EasyOCR/releases/download/v1.3/zh_sim_g2.zip",
-            "https://github.com/JaidedAI/EasyOCR/releases/download/v1.3/zh_tra_g2.zip",
-            "https://github.com/JaidedAI/EasyOCR/releases/download/v1.3/english_g2.zip"
-        )
-        foreach ($url in $models) {
-            $filename = [System.IO.Path]::GetFileName($url)
-            Invoke-WebRequest -Uri $url -OutFile $filename
-            Expand-Archive -Path $filename -DestinationPath "Library/model" -Force
-        }
+        # 2. 準備 EasyOCR 離線模型 (利用 Python 讓套件自動下載正確網址，再複製出來)
+        @"
+        import easyocr
+        import shutil
+        import os
+        print('正在下載 EasyOCR 模型...')
+        # 實例化 Reader 就會自動下載缺少的模型到預設路徑 (~/.EasyOCR/model)
+        easyocr.Reader(['ch_tra', 'ch_sim', 'en'])
+        
+        # 將下載好的模型搬移到我們的打包資料夾 Library/model 內
+        src = os.path.join(os.path.expanduser('~'), '.EasyOCR', 'model')
+        dst = 'Library/model'
+        shutil.copytree(src, dst, dirs_exist_ok=True)
+        print('模型已成功放入 Library/model！')
+        "@ > download_models.py
+        
+        python download_models.py
 
     - name: Build Executable (Portable Structure)
       run: |
