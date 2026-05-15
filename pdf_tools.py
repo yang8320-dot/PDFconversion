@@ -6,15 +6,56 @@ from utils import get_poppler_path, apply_watermark_removal, format_size
 # --- 基礎合併與轉換 ---
 
 def process_merge_pdfs(input_files, output_path, status_callback, stop_event):
-    from pypdf import PdfWriter  
-    merger = PdfWriter()
-    total = len(input_files)
-    for i, pdf in enumerate(input_files):
-        if stop_event.is_set(): return
-        status_callback(f"📑 正在合併 PDF... ({i+1}/{total})", (i+1)/total)
-        merger.append(pdf, import_outline=True) 
-    merger.write(output_path)
-    merger.close()
+    from pypdf import PdfWriter
+    import fitz
+    import pythoncom  # 用於多執行緒調用 Word COM 元件
+    
+    # 必須初始化 COM，否則在 Thread 裡面背景呼叫 MS Word 會崩潰
+    pythoncom.CoInitialize()
+    
+    try:
+        merger = PdfWriter()
+        total = len(input_files)
+        
+        with tempfile.TemporaryDirectory() as temp_dir:
+            for i, file_path in enumerate(input_files):
+                if stop_event.is_set(): return
+                base_name = os.path.basename(file_path)
+                status_callback(f"📑 處理合併: {base_name} ({i+1}/{total})", (i+1)/total)
+                
+                ext = file_path.lower().split('.')[-1]
+                
+                if ext == 'pdf':
+                    merger.append(file_path)
+                    
+                elif ext in ['jpg', 'jpeg', 'png', 'bmp']:
+                    # 圖片轉 PDF 並寫入暫存
+                    img_doc = fitz.open(file_path)
+                    pdf_bytes = img_doc.convert_to_pdf()
+                    img_pdf = fitz.open("pdf", pdf_bytes)
+                    temp_pdf = os.path.join(temp_dir, f"temp_{i}.pdf")
+                    img_pdf.save(temp_pdf)
+                    img_pdf.close(); img_doc.close()
+                    merger.append(temp_pdf)
+                    
+                elif ext in ['docx', 'doc']:
+                    from docx2pdf import convert
+                    temp_pdf = os.path.join(temp_dir, f"temp_{i}.pdf")
+                    try:
+                        # 呼叫本機 MS Word 進行完美格式轉換
+                        convert(file_path, temp_pdf)
+                        merger.append(temp_pdf)
+                    except Exception as e:
+                        raise Exception(f"Word 轉換失敗 ({base_name})\n1. 請確認電腦有安裝 Microsoft Word。\n2. 請確認沒有開啟對話框卡住 Word。\n錯誤細節: {e}")
+                else:
+                    raise Exception(f"不支援的檔案格式: {ext}")
+            
+            if stop_event.is_set(): return
+            status_callback("💾 正在輸出最終合併檔案...", 0.95)
+            merger.write(output_path)
+            merger.close()
+    finally:
+        pythoncom.CoUninitialize()
 
 def process_images_to_pdf(input_files, output_path, status_callback, stop_event):
     import fitz  
@@ -177,7 +218,6 @@ def process_to_grayscale(input_file, output_path, status_callback, stop_event, d
     doc.close(); new_doc.close()
 
 def process_flatten_pdf(input_file, output_path, status_callback, stop_event, dpi=200):
-    """將 PDF 轉為純圖片以防止竄改 (扁平化)"""
     import fitz
     doc = fitz.open(input_file)
     new_doc = fitz.open()
@@ -186,7 +226,7 @@ def process_flatten_pdf(input_file, output_path, status_callback, stop_event, dp
         if stop_event.is_set(): return
         status_callback(f"🥞 正在扁平化 PDF 防止篡改 ({i+1}/{total})...", (i+1)/total)
         page = doc[i]
-        pix = page.get_pixmap(dpi=dpi) # 保持彩色
+        pix = page.get_pixmap(dpi=dpi)
         new_page = new_doc.new_page(width=page.rect.width, height=page.rect.height)
         new_page.insert_image(page.rect, pixmap=pix)
     new_doc.save(output_path, garbage=4, deflate=True)
@@ -253,25 +293,19 @@ def process_add_image_watermark(input_file, output_path, img_path, position, sta
     import fitz
     doc = fitz.open(input_file)
     total = len(doc)
-    # 打開圖片以獲取比例
     img_doc = fitz.open(img_path)
     img_rect = img_doc[0].rect
     img_doc.close()
-
     for i, page in enumerate(doc):
         if stop_event.is_set(): return
         status_callback(f"🖼️ 正在壓印圖片浮水印... ({i+1}/{total})", (i+1)/total)
         page_rect = page.rect
-        
-        # 假設浮水印寬度為頁面寬度的 25%
         w = page_rect.width * 0.25
         h = w * (img_rect.height / img_rect.width)
-        
         if position == "右下角": target_rect = fitz.Rect(page_rect.width - w - 20, page_rect.height - h - 20, page_rect.width - 20, page_rect.height - 20)
         elif position == "左下角": target_rect = fitz.Rect(20, page_rect.height - h - 20, 20 + w, page_rect.height - 20)
         elif position == "右上角": target_rect = fitz.Rect(page_rect.width - w - 20, 20, page_rect.width - 20, 20 + h)
-        else: target_rect = fitz.Rect(20, 20, 20 + w, 20 + h) # 左上角
-            
+        else: target_rect = fitz.Rect(20, 20, 20 + w, 20 + h)
         page.insert_image(target_rect, filename=img_path)
     doc.save(output_path)
     doc.close()
