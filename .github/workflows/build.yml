@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version_name:
-        description: '版本名稱 (例如: v2.3.0)'
+        description: '版本名稱 (例如: v2.4.0)'
         required: true
-        default: 'v2.3.0'
+        default: 'v2.4.0'
       build_mode:
         description: '選擇打包模式'
         required: true
@@ -41,9 +41,6 @@ jobs:
     - name: Install UPX for Executable Compression
       run: choco install upx
 
-    # ==========================================
-    # 只有選擇「Full」時，才執行下載 Poppler
-    # ==========================================
     - name: Download and Prep Poppler
       if: github.event.inputs.build_mode == 'Full (完整打包 - 含 Poppler 引擎與所有函式庫)'
       shell: pwsh
@@ -55,15 +52,15 @@ jobs:
         New-Item -ItemType Directory -Path "Library/poppler_bin" -Force
         Copy-Item -Path "poppler_temp/poppler-24.02.0/Library/bin/*" -Destination "Library/poppler_bin" -Recurse
 
-    # ==========================================
-    # 根據選擇的模式執行 PyInstaller (加入 icon 設定)
-    # ==========================================
     - name: Build Executable (Portable Structure)
       shell: pwsh
       run: |
         $MODE = "${{ github.event.inputs.build_mode }}"
         
         $EXCLUDES = "--exclude-module matplotlib --exclude-module IPython --exclude-module pytest --exclude-module torch --exclude-module torchvision --exclude-module easyocr"
+        
+        # 加入 hidden-import 確保 pythoncom 相關元件打包正確
+        $HIDDEN = "--hidden-import win32timezone --hidden-import win32com"
         
         if ($MODE -eq 'Full (完整打包 - 含 Poppler 引擎與所有函式庫)') {
             pyinstaller --noconfirm --onedir --noconsole `
@@ -73,6 +70,8 @@ jobs:
               --icon "icon.ico" `
               --collect-all tkinterdnd2 `
               --collect-all customtkinter `
+              --collect-all docx2pdf `
+              $HIDDEN.Split(" ") `
               $EXCLUDES.Split(" ") `
               --upx-exclude "*.dll" `
               --upx-exclude "*.pyd" `
@@ -85,6 +84,8 @@ jobs:
               --icon "icon.ico" `
               --collect-all tkinterdnd2 `
               --collect-all customtkinter `
+              --collect-all docx2pdf `
+              $HIDDEN.Split(" ") `
               $EXCLUDES.Split(" ") `
               --upx-exclude "*.dll" `
               --upx-exclude "*.pyd" `
@@ -92,9 +93,6 @@ jobs:
               main.py
         }
 
-    # ==========================================
-    # 壓縮為 ZIP
-    # ==========================================
     - name: Package to Zip
       shell: pwsh
       run: |
