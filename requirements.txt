@@ -6,3 +6,5 @@ pyinstaller
 tkinterdnd2
 customtkinter
 pillow
+docx2pdf
+pywin32
