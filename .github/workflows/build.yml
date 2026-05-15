@@ -33,7 +33,7 @@ jobs:
     - name: Download and Prep Poppler & EasyOCR Models
       shell: pwsh
       env:
-        PYTHONIOENCODING: "utf8" # <--- 強制 Python 使用 UTF-8 處理進度條符號
+        PYTHONIOENCODING: "utf8"
       run: |
         # 1. 準備 Poppler
         Invoke-WebRequest -Uri "https://github.com/oschwartz10612/poppler-windows/releases/download/v24.02.0-0/Release-24.02.0-0.zip" -OutFile "poppler.zip"
@@ -41,16 +41,17 @@ jobs:
         New-Item -ItemType Directory -Path "Library/poppler_bin" -Force
         Copy-Item -Path "poppler_temp/poppler-24.02.0/Library/bin/*" -Destination "Library/poppler_bin" -Recurse
 
-        # 2. 準備 EasyOCR 離線模型
+        # 2. 準備 EasyOCR 離線模型 (分開下載繁體與簡體，避免衝突)
         @"
         import easyocr
         import shutil
         import os
-        print('Downloading EasyOCR models...')
-        # 實例化 Reader 就會自動下載缺少的模型到預設路徑 (~/.EasyOCR/model)
-        easyocr.Reader(['ch_tra', 'ch_sim', 'en'])
+        print('Downloading Traditional Chinese & English models...')
+        easyocr.Reader(['ch_tra', 'en'])
         
-        # 將下載好的模型搬移到我們的打包資料夾 Library/model 內
+        print('Downloading Simplified Chinese model...')
+        easyocr.Reader(['ch_sim', 'en'])
+        
         src = os.path.join(os.path.expanduser('~'), '.EasyOCR', 'model')
         dst = 'Library/model'
         shutil.copytree(src, dst, dirs_exist_ok=True)
