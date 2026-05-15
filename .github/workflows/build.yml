@@ -32,6 +32,8 @@ jobs:
 
     - name: Download and Prep Poppler & EasyOCR Models
       shell: pwsh
+      env:
+        PYTHONIOENCODING: "utf8" # <--- 強制 Python 使用 UTF-8 處理進度條符號
       run: |
         # 1. 準備 Poppler
         Invoke-WebRequest -Uri "https://github.com/oschwartz10612/poppler-windows/releases/download/v24.02.0-0/Release-24.02.0-0.zip" -OutFile "poppler.zip"
@@ -39,7 +41,7 @@ jobs:
         New-Item -ItemType Directory -Path "Library/poppler_bin" -Force
         Copy-Item -Path "poppler_temp/poppler-24.02.0/Library/bin/*" -Destination "Library/poppler_bin" -Recurse
 
-        # 2. 準備 EasyOCR 離線模型 (修正 print 英文避免 CI 環境編碼錯誤)
+        # 2. 準備 EasyOCR 離線模型
         @"
         import easyocr
         import shutil
