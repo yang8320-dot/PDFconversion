@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version_name:
-        description: '版本名稱 (例如: v2.2.0)'
+        description: '版本名稱 (例如: v2.3.0)'
         required: true
-        default: 'v2.2.0'
+        default: 'v2.3.0'
       build_mode:
         description: '選擇打包模式'
         required: true
@@ -43,7 +43,6 @@ jobs:
 
     # ==========================================
     # 只有選擇「Full」時，才執行下載 Poppler
-    # (已移除 EasyOCR 模型下載)
     # ==========================================
     - name: Download and Prep Poppler
       if: github.event.inputs.build_mode == 'Full (完整打包 - 含 Poppler 引擎與所有函式庫)'
@@ -51,27 +50,27 @@ jobs:
       env:
         PYTHONIOENCODING: "utf8"
       run: |
-        # 下載 Poppler 渲染引擎
         Invoke-WebRequest -Uri "https://github.com/oschwartz10612/poppler-windows/releases/download/v24.02.0-0/Release-24.02.0-0.zip" -OutFile "poppler.zip"
         Expand-Archive -Path "poppler.zip" -DestinationPath "poppler_temp"
         New-Item -ItemType Directory -Path "Library/poppler_bin" -Force
         Copy-Item -Path "poppler_temp/poppler-24.02.0/Library/bin/*" -Destination "Library/poppler_bin" -Recurse
 
     # ==========================================
-    # 根據選擇的模式執行 PyInstaller
+    # 根據選擇的模式執行 PyInstaller (加入 icon 設定)
     # ==========================================
     - name: Build Executable (Portable Structure)
       shell: pwsh
       run: |
         $MODE = "${{ github.event.inputs.build_mode }}"
         
-        # 強制排除機器學習與其他肥大模組，確保檔案最小化
         $EXCLUDES = "--exclude-module matplotlib --exclude-module IPython --exclude-module pytest --exclude-module torch --exclude-module torchvision --exclude-module easyocr"
         
         if ($MODE -eq 'Full (完整打包 - 含 Poppler 引擎與所有函式庫)') {
             pyinstaller --noconfirm --onedir --noconsole `
               --contents-directory "Library" `
               --add-data "Library/poppler_bin;Library/poppler_bin" `
+              --add-data "icon.ico;." `
+              --icon "icon.ico" `
               --collect-all tkinterdnd2 `
               --collect-all customtkinter `
               $EXCLUDES.Split(" ") `
@@ -80,9 +79,10 @@ jobs:
               --name "PDFconversion" `
               main.py
         } else {
-            # 輕量更新模式：不包含龐大的依賴資料夾
             pyinstaller --noconfirm --onedir --noconsole `
               --contents-directory "Library" `
+              --add-data "icon.ico;." `
+              --icon "icon.ico" `
               --collect-all tkinterdnd2 `
               --collect-all customtkinter `
               $EXCLUDES.Split(" ") `
@@ -93,7 +93,7 @@ jobs:
         }
 
     # ==========================================
-    # 根據模式決定壓縮什麼檔案
+    # 壓縮為 ZIP
     # ==========================================
     - name: Package to Zip
       shell: pwsh
@@ -104,7 +104,6 @@ jobs:
         if ($MODE -eq 'Full (完整打包 - 含 Poppler 引擎與所有函式庫)') {
             Compress-Archive -Path dist/PDFconversion/* -DestinationPath "PDFconversion_Full_$VERSION.zip"
         } else {
-            # 輕量模式：只壓縮瘦身後的主程式
             Compress-Archive -Path dist/PDFconversion/PDFconversion.exe -DestinationPath "PDFconversion_Lite_$VERSION.zip"
         }
 
