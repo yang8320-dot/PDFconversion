@@ -10,7 +10,8 @@ import customtkinter as ctk
 from pdf_tools import (process_merge_pdfs, process_protect_pdf, process_split_pdf, process_pdf_to_images, 
                        process_compress_pdf, process_remove_watermark, process_pdf_to_ppt, 
                        process_images_to_pdf, process_unlock_pdf, process_rotate_pdf, process_add_watermark,
-                       process_remove_pages, process_to_grayscale, process_extract_text, process_insert_blank_page)
+                       process_remove_pages, process_to_grayscale, process_extract_text, process_insert_blank_page,
+                       process_add_page_numbers, process_reorder_pages, process_extract_original_images)
 from utils import check_poppler_exists, open_file_or_folder
 
 def check_single_instance():
@@ -86,33 +87,37 @@ class ListManagerWindow(ctk.CTkToplevel):
 class PDFToolApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("PDF 辦公室工具")
-        # 放大視窗以容納更多功能選項
-        self.root.geometry("820x420") 
+        self.root.title("PDF 辦公室全能工具箱")
+        # 因應 5x4 排版，將寬度稍微拉寬，確保字體不擁擠
+        self.root.geometry("900x420") 
         ctk.set_appearance_mode("light")  
         ctk.set_default_color_theme("blue")  
 
         if not check_poppler_exists():
-            messagebox.showwarning("元件缺失", "找不到 Poppler 渲染元件，圖片處理相關功能可能無法正常運作。")
+            messagebox.showwarning("元件缺失", "找不到 Poppler 渲染元件，圖片轉檔相關功能可能受限。")
 
         self.mode_var = ctk.StringVar(value="PPT")
         self.stop_event = threading.Event() 
 
-        # 功能選擇區塊 (16格 4x4)
+        # 功能選擇區塊 (5x4 排版)
         mode_frame = ctk.CTkFrame(self.root, fg_color="transparent")
         mode_frame.pack(fill="x", padx=15, pady=(10, 5))
-        for i in range(4): mode_frame.grid_columnconfigure(i, weight=1, uniform="col_group")
+        for i in range(5): mode_frame.grid_columnconfigure(i, weight=1, uniform="col_group")
         
-        modes1 = [("PDF 轉 PPT", "PPT"), ("PDF 轉圖片", "PDF2IMG"), ("圖片轉 PDF", "IMG2PDF"), ("提取純文字", "EXTRACT_TXT")]
-        modes2 = [("提取/分割 PDF", "SPLIT"), ("刪除指定頁", "REMOVE_PAGES"), ("插入空白頁", "INSERT_BLANK"), ("合併 PDF", "MERGE")]
-        modes3 = [("加密 PDF", "PROTECT"), ("解鎖 PDF", "UNLOCK"), ("轉黑白/灰階", "GRAYSCALE"), ("PDF 壓縮", "COMPRESS")]
-        modes4 = [("PDF 旋轉", "ROTATE"), ("去浮水印", "RMWATERMARK"), ("加文字浮水印", "ADD_WM"), ("", "")]
+        # Row 1: 格式轉換
+        modes1 = [("PDF 轉 PPT", "PPT"), ("PDF 轉圖片", "PDF2IMG"), ("圖片轉 PDF", "IMG2PDF"), ("提取純文字", "EXTRACT_TXT"), ("提取內嵌圖", "EXTRACT_IMGS")]
+        # Row 2: 頁面管理
+        modes2 = [("提取/分割 PDF", "SPLIT"), ("刪除指定頁", "REMOVE_PAGES"), ("插入空白頁", "INSERT_BLANK"), ("重新排序頁", "REORDER"), ("合併 PDF", "MERGE")]
+        # Row 3: 內容修改
+        modes3 = [("轉黑白/灰階", "GRAYSCALE"), ("PDF 壓縮", "COMPRESS"), ("PDF 旋轉", "ROTATE"), ("添加頁碼", "ADD_PAGE_NUM"), ("加文字水印", "ADD_WM")]
+        # Row 4: 進階保全
+        modes4 = [("加密 PDF", "PROTECT"), ("解鎖 PDF", "UNLOCK"), ("去浮水印", "RMWATERMARK"), ("", ""), ("", "")]
         
-        for i, (text, val) in enumerate(modes1): ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 13)).grid(row=0, column=i, padx=5, pady=6, sticky="w")
-        for i, (text, val) in enumerate(modes2): ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 13)).grid(row=1, column=i, padx=5, pady=6, sticky="w")
-        for i, (text, val) in enumerate(modes3): ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 13)).grid(row=2, column=i, padx=5, pady=6, sticky="w")
+        for i, (text, val) in enumerate(modes1): ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 12)).grid(row=0, column=i, padx=2, pady=6, sticky="w")
+        for i, (text, val) in enumerate(modes2): ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 12)).grid(row=1, column=i, padx=2, pady=6, sticky="w")
+        for i, (text, val) in enumerate(modes3): ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 12)).grid(row=2, column=i, padx=2, pady=6, sticky="w")
         for i, (text, val) in enumerate(modes4): 
-            if text: ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 13)).grid(row=3, column=i, padx=5, pady=6, sticky="w")
+            if text: ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 12)).grid(row=3, column=i, padx=2, pady=6, sticky="w")
 
         # 進階設定區塊
         self.opt_frame = ctk.CTkFrame(self.root, fg_color="#eef5fa", corner_radius=10)
@@ -190,7 +195,6 @@ class PDFToolApp:
         output_path = None
         extra_args = {}
         
-        # 路由介面與儲存對話框
         if mode == "SPLIT": 
             ranges = ctk.CTkInputDialog(text="請輸入提取頁碼 (如 1-3,5)\n若要獨立全部分割請留白：", title="提取/分割").get_input()
             if ranges is None: return 
@@ -210,8 +214,17 @@ class PDFToolApp:
             output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_inserted.pdf", defaultextension=".pdf")
             extra_args["ranges"] = ranges
             
+        elif mode == "REORDER":
+            ranges = ctk.CTkInputDialog(text="請輸入新的排序頁碼 (如 3, 1, 2)：", title="重新排序").get_input()
+            if not ranges: return
+            output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_reordered.pdf", defaultextension=".pdf")
+            extra_args["ranges"] = ranges
+            
         elif mode == "EXTRACT_TXT":
             output_path = filedialog.asksaveasfilename(title="儲存純文字檔", initialfile=f"{first_file_name}.txt", defaultextension=".txt")
+            
+        elif mode == "EXTRACT_IMGS":
+            output_path = filedialog.askdirectory(title="選擇圖片提取的儲存資料夾")
             
         elif mode == "GRAYSCALE":
             output_path = filedialog.asksaveasfilename(title="儲存黑白 PDF", initialfile=f"{first_file_name}_bw.pdf", defaultextension=".pdf")
@@ -235,6 +248,9 @@ class PDFToolApp:
             if not txt: return
             output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_wm.pdf", defaultextension=".pdf")
             extra_args["text"] = txt
+            
+        elif mode == "ADD_PAGE_NUM":
+            output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_pages.pdf", defaultextension=".pdf")
             
         elif mode == "ROTATE":
             output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_rotated.pdf", defaultextension=".pdf")
@@ -290,12 +306,15 @@ class PDFToolApp:
             elif mode == "SPLIT": process_split_pdf(input_data[0], output_data, extra["ranges"], **kwargs)
             elif mode == "REMOVE_PAGES": process_remove_pages(input_data[0], output_data, extra["ranges"], **kwargs)
             elif mode == "INSERT_BLANK": process_insert_blank_page(input_data[0], output_data, extra["ranges"], **kwargs)
+            elif mode == "REORDER": process_reorder_pages(input_data[0], output_data, extra["ranges"], **kwargs)
             elif mode == "EXTRACT_TXT": process_extract_text(input_data[0], output_data, **kwargs)
+            elif mode == "EXTRACT_IMGS": result_msg = process_extract_original_images(input_data[0], output_data, **kwargs)
             elif mode == "GRAYSCALE": process_to_grayscale(input_data[0], output_data, dpi=extra["dpi"], **kwargs)
             elif mode == "PROTECT": process_protect_pdf(input_data[0], output_data, extra["pwd"], **kwargs)
             elif mode == "UNLOCK": process_unlock_pdf(input_data[0], output_data, extra["pwd"], **kwargs)
             elif mode == "ROTATE": process_rotate_pdf(input_data[0], output_data, extra["angle"], **kwargs)
             elif mode == "ADD_WM": process_add_watermark(input_data[0], output_data, extra["text"], **kwargs)
+            elif mode == "ADD_PAGE_NUM": process_add_page_numbers(input_data[0], output_data, **kwargs)
             elif mode == "PDF2IMG": process_pdf_to_images(input_data[0], output_data, dpi=extra["dpi"], **kwargs)
             elif mode == "COMPRESS": result_msg = process_compress_pdf(input_data[0], output_data, **kwargs)
             elif mode == "RMWATERMARK": process_remove_watermark(input_data[0], output_data, dpi=extra["dpi"], position=extra["position"], **kwargs)
