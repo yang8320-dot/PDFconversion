@@ -3,18 +3,21 @@ import easyocr
 from pdf2image import convert_from_path
 from docx import Document
 from docx.shared import Pt as DocxPt, Inches
-from utils import get_poppler_path, get_model_path
+from utils import get_poppler_path, get_model_path, apply_watermark_removal
 from PIL import Image
 
-def process_ocr_to_word(input_file, output_path, status_callback, stop_event, use_gpu):
+def process_ocr_to_word(input_file, output_path, status_callback, stop_event, use_gpu, rm_wm):
     status_callback("⏳ 正在初始化 OCR 模型...", 0.05)
+    
     model_path = get_model_path()
+    # 支援 GPU 加速切換與強制離線模式
     reader = easyocr.Reader(['ch_tra', 'en'], model_storage_directory=model_path, download_enabled=False, gpu=use_gpu)
     
     if input_file.lower().endswith('.pdf'):
-        status_callback("📄 正在將 PDF 轉為圖片...", 0.1)
-        pages = convert_from_path(input_file, dpi=200, poppler_path=get_poppler_path())
+        status_callback("📄 正在將 PDF 轉為高解析度圖片 (300 DPI)...", 0.1)
+        pages = convert_from_path(input_file, dpi=300, poppler_path=get_poppler_path())
     else:
+        status_callback("🖼️ 正在讀取圖片檔案...", 0.1)
         pages = [Image.open(input_file).convert('RGB')]
 
     total_pages = len(pages)
@@ -24,14 +27,18 @@ def process_ocr_to_word(input_file, output_path, status_callback, stop_event, us
         if stop_event.is_set(): break
         status_callback(f"🔍 正在辨識 Word 圖文 (第 {i+1} / {total_pages} 頁)...", 0.1 + 0.8 * ((i+1)/total_pages))
         
+        # 【去浮水印處理】如果使用者有勾選，則進行覆蓋抹除
+        if rm_wm:
+            page_img = apply_watermark_removal(page_img)
+            
         temp_img = f"temp_word_page_{i}.jpg"
         page_img.save(temp_img, 'JPEG')
         
         # 【優化：先將原圖插入 Word 中作為對照】
         doc.add_paragraph(f"--- 第 {i+1} 頁 原始圖片 ---").style.font.name = 'Microsoft JhengHei'
-        doc.add_picture(temp_img, width=Inches(6.0)) # 寬度限制在 6 吋避免爆框
+        doc.add_picture(temp_img, width=Inches(6.0)) # 限制最大寬度避免爆框
         
-        # 開啟 paragraph=True 合併段落
+        # 進行 OCR 辨識，開啟 paragraph=True 實作段落合併
         result = reader.readtext(temp_img, paragraph=True)
         
         doc.add_paragraph(f"--- 第 {i+1} 頁 辨識文字 ---").style.font.name = 'Microsoft JhengHei'
@@ -41,8 +48,9 @@ def process_ocr_to_word(input_file, output_path, status_callback, stop_event, us
             for run in p.runs:
                 run.font.size = DocxPt(11)
         
+        # 若不是最後一頁，則加入分頁符號
         if i < total_pages - 1:
-            doc.add_page_break() # 換頁處理下一張
+            doc.add_page_break() 
                 
         os.remove(temp_img)
     
