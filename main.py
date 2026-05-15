@@ -101,7 +101,7 @@ class PDFToolApp:
     def __init__(self, root):
         self.root = root
         self.root.title("PDF 辦公室全能工具箱")
-        self.root.geometry("900x420") 
+        self.root.geometry("900x370") 
         ctk.set_appearance_mode("light")  
         ctk.set_default_color_theme("blue")  
 
