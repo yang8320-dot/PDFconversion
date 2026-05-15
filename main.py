@@ -13,7 +13,9 @@ from pdf_tools import (process_merge_pdfs, process_protect_pdf, process_split_pd
                        process_remove_pages, process_to_grayscale, process_extract_text, process_insert_blank_page,
                        process_add_page_numbers, process_reorder_pages, process_extract_original_images,
                        process_flatten_pdf, process_add_image_watermark)
-from utils import check_poppler_exists, open_file_or_folder
+
+# 增加匯入 get_base_path 來定位 icon.ico 的正確路徑
+from utils import check_poppler_exists, open_file_or_folder, get_base_path
 
 def check_single_instance():
     mutex_name = "Global\\PDF_TOOL_MUTEX"
@@ -100,24 +102,26 @@ class PDFToolApp:
         ctk.set_appearance_mode("light")  
         ctk.set_default_color_theme("blue")  
 
+        # ------------------ 設定視窗與工具列圖示 ------------------
+        icon_path = os.path.join(get_base_path(), "icon.ico")
+        if os.path.exists(icon_path):
+            self.root.iconbitmap(icon_path)
+        # --------------------------------------------------------
+
         if not check_poppler_exists():
             messagebox.showwarning("元件缺失", "找不到 Poppler 渲染元件，圖片轉檔相關功能可能受限。")
 
         self.mode_var = ctk.StringVar(value="PPT")
         self.stop_event = threading.Event() 
 
-        # 功能選擇區塊 (完美 5x4 排版，共 20 個功能)
+        # 功能選擇區塊
         mode_frame = ctk.CTkFrame(self.root, fg_color="transparent")
         mode_frame.pack(fill="x", padx=15, pady=(10, 5))
         for i in range(5): mode_frame.grid_columnconfigure(i, weight=1, uniform="col_group")
         
-        # Row 1: 格式轉換
         modes1 = [("PDF 轉 PPT", "PPT"), ("PDF 轉圖片", "PDF2IMG"), ("圖片轉 PDF", "IMG2PDF"), ("提取純文字", "EXTRACT_TXT"), ("提取內嵌圖", "EXTRACT_IMGS")]
-        # Row 2: 頁面管理
         modes2 = [("提取/分割 PDF", "SPLIT"), ("刪除指定頁", "REMOVE_PAGES"), ("插入空白頁", "INSERT_BLANK"), ("重新排序頁", "REORDER"), ("合併 PDF", "MERGE")]
-        # Row 3: 內容修改
         modes3 = [("轉黑白/灰階", "GRAYSCALE"), ("扁平化(防篡改)", "FLATTEN"), ("PDF 壓縮", "COMPRESS"), ("PDF 旋轉", "ROTATE"), ("添加頁碼", "ADD_PAGE_NUM")]
-        # Row 4: 進階保全
         modes4 = [("加密 PDF", "PROTECT"), ("解鎖 PDF", "UNLOCK"), ("加文字浮水印", "ADD_WM"), ("加圖片浮水印", "IMG_WM"), ("去浮水印", "RMWATERMARK")]
         
         for i, (text, val) in enumerate(modes1): ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 12)).grid(row=0, column=i, padx=2, pady=6, sticky="w")
@@ -195,11 +199,9 @@ class PDFToolApp:
         first_file = valid_files[0]
         first_file_name = os.path.splitext(os.path.basename(first_file))[0]
 
-        # ------------------ 防呆攔截：檢查是否加密 ------------------
         if mode != "UNLOCK" and first_file.lower().endswith(".pdf"):
             if check_is_encrypted(first_file):
                 return messagebox.showwarning("檔案已加密", "⚠️ 此 PDF 受到密碼保護！\n\n請先選擇「解鎖 PDF」功能，輸入密碼將其解密為一般檔案後，再進行其他操作。")
-        # ------------------------------------------------------------
 
         if mode in ["MERGE", "IMG2PDF"]: 
             return ListManagerWindow(self.root, valid_files, mode, lambda sf: self.trigger_list_process(mode, sf, first_file_name))
