@@ -9,7 +9,8 @@ import customtkinter as ctk
 
 from pdf_tools import (process_merge_pdfs, process_protect_pdf, process_split_pdf, process_pdf_to_images, 
                        process_compress_pdf, process_remove_watermark, process_pdf_to_ppt, 
-                       process_images_to_pdf, process_unlock_pdf, process_rotate_pdf, process_add_watermark)
+                       process_images_to_pdf, process_unlock_pdf, process_rotate_pdf, process_add_watermark,
+                       process_remove_pages, process_to_grayscale, process_extract_text, process_insert_blank_page)
 from utils import check_poppler_exists, open_file_or_folder
 
 def check_single_instance():
@@ -31,7 +32,6 @@ class CTkinterDnD(ctk.CTk, TkinterDnD.DnDWrapper):
         self.TkdndVersion = TkinterDnD._require(self)
 
 class ListManagerWindow(ctk.CTkToplevel):
-    """用於合併 PDF 或圖片轉 PDF 的清單管理器"""
     def __init__(self, parent, initial_files, mode, start_callback):
         super().__init__(parent)
         self.title("檔案合併管理器")
@@ -87,7 +87,8 @@ class PDFToolApp:
     def __init__(self, root):
         self.root = root
         self.root.title("PDF 辦公室工具")
-        self.root.geometry("800x380") # 調整視窗高度以容納更多按鈕
+        # 放大視窗以容納更多功能選項
+        self.root.geometry("820x420") 
         ctk.set_appearance_mode("light")  
         ctk.set_default_color_theme("blue")  
 
@@ -97,21 +98,23 @@ class PDFToolApp:
         self.mode_var = ctk.StringVar(value="PPT")
         self.stop_event = threading.Event() 
 
-        # 功能選擇區塊
+        # 功能選擇區塊 (16格 4x4)
         mode_frame = ctk.CTkFrame(self.root, fg_color="transparent")
         mode_frame.pack(fill="x", padx=15, pady=(10, 5))
         for i in range(4): mode_frame.grid_columnconfigure(i, weight=1, uniform="col_group")
         
-        modes1 = [("PDF 轉 PPT (純圖片)", "PPT"), ("去浮水印", "RMWATERMARK"), ("合併 PDF", "MERGE"), ("提取/分割 PDF", "SPLIT")]
-        modes2 = [("加密 PDF", "PROTECT"), ("解鎖 PDF", "UNLOCK"), ("PDF 轉圖片", "PDF2IMG"), ("圖片轉 PDF", "IMG2PDF")]
-        modes3 = [("PDF 壓縮", "COMPRESS"), ("PDF 旋轉", "ROTATE"), ("添加文字浮水印", "ADD_WM"), ("", "")]
+        modes1 = [("PDF 轉 PPT", "PPT"), ("PDF 轉圖片", "PDF2IMG"), ("圖片轉 PDF", "IMG2PDF"), ("提取純文字", "EXTRACT_TXT")]
+        modes2 = [("提取/分割 PDF", "SPLIT"), ("刪除指定頁", "REMOVE_PAGES"), ("插入空白頁", "INSERT_BLANK"), ("合併 PDF", "MERGE")]
+        modes3 = [("加密 PDF", "PROTECT"), ("解鎖 PDF", "UNLOCK"), ("轉黑白/灰階", "GRAYSCALE"), ("PDF 壓縮", "COMPRESS")]
+        modes4 = [("PDF 旋轉", "ROTATE"), ("去浮水印", "RMWATERMARK"), ("加文字浮水印", "ADD_WM"), ("", "")]
         
         for i, (text, val) in enumerate(modes1): ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 13)).grid(row=0, column=i, padx=5, pady=6, sticky="w")
         for i, (text, val) in enumerate(modes2): ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 13)).grid(row=1, column=i, padx=5, pady=6, sticky="w")
-        for i, (text, val) in enumerate(modes3): 
-            if text: ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 13)).grid(row=2, column=i, padx=5, pady=6, sticky="w")
+        for i, (text, val) in enumerate(modes3): ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 13)).grid(row=2, column=i, padx=5, pady=6, sticky="w")
+        for i, (text, val) in enumerate(modes4): 
+            if text: ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 13)).grid(row=3, column=i, padx=5, pady=6, sticky="w")
 
-        # 進階設定區塊 (動態顯示)
+        # 進階設定區塊
         self.opt_frame = ctk.CTkFrame(self.root, fg_color="#eef5fa", corner_radius=10)
         self.opt_frame.pack(fill="x", padx=15, pady=5)
         
@@ -129,7 +132,7 @@ class PDFToolApp:
         self.menu_rot = ctk.CTkOptionMenu(self.opt_frame, variable=self.rotate_var, values=["90度", "180度", "270度"], width=90)
 
         self.mode_var.trace_add("write", self.update_options_ui)
-        self.update_options_ui() # 初始化 UI
+        self.update_options_ui() 
 
         # 拖曳區塊
         self.drop_frame = ctk.CTkFrame(self.root, fg_color="#f9f9f9", border_width=2, border_color="#3a7ebf", corner_radius=15, height=70)
@@ -151,7 +154,7 @@ class PDFToolApp:
     def update_options_ui(self, *args):
         for widget in self.opt_frame.winfo_children(): widget.pack_forget()
         mode = self.mode_var.get()
-        if mode in ["PPT", "PDF2IMG", "RMWATERMARK"]:
+        if mode in ["PPT", "PDF2IMG", "RMWATERMARK", "GRAYSCALE"]:
             self.lbl_dpi.pack(side="left", padx=(10, 5), pady=5); self.menu_dpi.pack(side="left", padx=(0, 15))
         if mode == "RMWATERMARK":
             self.lbl_wm.pack(side="left", padx=(5, 5), pady=5); self.menu_wm.pack(side="left", padx=(0, 15))
@@ -187,39 +190,63 @@ class PDFToolApp:
         output_path = None
         extra_args = {}
         
+        # 路由介面與儲存對話框
         if mode == "SPLIT": 
             ranges = ctk.CTkInputDialog(text="請輸入提取頁碼 (如 1-3,5)\n若要獨立全部分割請留白：", title="提取/分割").get_input()
-            if ranges is None: return # 按下取消
-            if ranges.strip() == "":
-                output_path = filedialog.askdirectory(title="選擇分割檔儲存資料夾")
-            else:
-                output_path = filedialog.asksaveasfilename(title="儲存提取的 PDF", initialfile=f"{first_file_name}_extracted.pdf", defaultextension=".pdf")
+            if ranges is None: return 
+            if ranges.strip() == "": output_path = filedialog.askdirectory(title="選擇分割檔儲存資料夾")
+            else: output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_extracted.pdf", defaultextension=".pdf")
             extra_args["ranges"] = ranges
+            
+        elif mode == "REMOVE_PAGES":
+            ranges = ctk.CTkInputDialog(text="請輸入要【刪除】的頁碼 (如 12, 15-20)：", title="刪除頁面").get_input()
+            if not ranges: return
+            output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_removed.pdf", defaultextension=".pdf")
+            extra_args["ranges"] = ranges
+            
+        elif mode == "INSERT_BLANK":
+            ranges = ctk.CTkInputDialog(text="請輸入要在哪些頁碼【之後】插入空白頁\n(例如輸入 1,3 代表在第1頁與第3頁後插入)：", title="插入空白頁").get_input()
+            if not ranges: return
+            output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_inserted.pdf", defaultextension=".pdf")
+            extra_args["ranges"] = ranges
+            
+        elif mode == "EXTRACT_TXT":
+            output_path = filedialog.asksaveasfilename(title="儲存純文字檔", initialfile=f"{first_file_name}.txt", defaultextension=".txt")
+            
+        elif mode == "GRAYSCALE":
+            output_path = filedialog.asksaveasfilename(title="儲存黑白 PDF", initialfile=f"{first_file_name}_bw.pdf", defaultextension=".pdf")
 
         elif mode == "PDF2IMG": output_path = filedialog.askdirectory(title="選擇儲存資料夾")
+        
         elif mode == "PROTECT":
             pwd = ctk.CTkInputDialog(text="請輸入要設定的密碼：", title="加密").get_input()
             if not pwd: return
             output_path = filedialog.asksaveasfilename(title="儲存加密 PDF", initialfile=f"{first_file_name}_protected.pdf", defaultextension=".pdf")
             extra_args["pwd"] = pwd
+            
         elif mode == "UNLOCK":
             pwd = ctk.CTkInputDialog(text="請輸入目前 PDF 的密碼：", title="解鎖").get_input()
             if not pwd: return
             output_path = filedialog.asksaveasfilename(title="儲存解鎖 PDF", initialfile=f"{first_file_name}_unlocked.pdf", defaultextension=".pdf")
             extra_args["pwd"] = pwd
+            
         elif mode == "ADD_WM":
             txt = ctk.CTkInputDialog(text="請輸入要添加的文字：", title="添加浮水印").get_input()
             if not txt: return
             output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_wm.pdf", defaultextension=".pdf")
             extra_args["text"] = txt
+            
         elif mode == "ROTATE":
-            output_path = filedialog.asksaveasfilename(title="儲存旋轉後的 PDF", initialfile=f"{first_file_name}_rotated.pdf", defaultextension=".pdf")
+            output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_rotated.pdf", defaultextension=".pdf")
             extra_args["angle"] = self.rotate_var.get()
+            
         elif mode == "COMPRESS": 
             output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_compressed.pdf", defaultextension=".pdf")
+            
         elif mode == "RMWATERMARK": 
             output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_clean", defaultextension=".pdf", filetypes=[("PDF", "*.pdf"), ("PPT", "*.pptx")])
             extra_args["position"] = self.wm_pos_var.get()
+            
         elif mode == "PPT":
             if len(valid_files) == 1: output_path = filedialog.asksaveasfilename(title="儲存 PPT", initialfile=first_file_name, defaultextension=".pptx")
             else:
@@ -261,6 +288,10 @@ class PDFToolApp:
             if mode == "MERGE": process_merge_pdfs(input_data, output_data, **kwargs)
             elif mode == "IMG2PDF": process_images_to_pdf(input_data, output_data, **kwargs)
             elif mode == "SPLIT": process_split_pdf(input_data[0], output_data, extra["ranges"], **kwargs)
+            elif mode == "REMOVE_PAGES": process_remove_pages(input_data[0], output_data, extra["ranges"], **kwargs)
+            elif mode == "INSERT_BLANK": process_insert_blank_page(input_data[0], output_data, extra["ranges"], **kwargs)
+            elif mode == "EXTRACT_TXT": process_extract_text(input_data[0], output_data, **kwargs)
+            elif mode == "GRAYSCALE": process_to_grayscale(input_data[0], output_data, dpi=extra["dpi"], **kwargs)
             elif mode == "PROTECT": process_protect_pdf(input_data[0], output_data, extra["pwd"], **kwargs)
             elif mode == "UNLOCK": process_unlock_pdf(input_data[0], output_data, extra["pwd"], **kwargs)
             elif mode == "ROTATE": process_rotate_pdf(input_data[0], output_data, extra["angle"], **kwargs)
@@ -284,7 +315,7 @@ class PDFToolApp:
                 self.update_status("✅ 任務完成！", 1)
                 msg = result_msg if result_msg else "作業成功！檔案已處理完成。"
                 messagebox.showinfo("完成", msg)
-                open_file_or_folder(output_data) # 完成後自動打開資料夾
+                open_file_or_folder(output_data) 
         except Exception as e:
             self.update_status("❌ 發生錯誤", 0); messagebox.showerror("錯誤", f"執行錯誤：\n{e}")
         finally: self.root.after(0, lambda: self.set_ui_state("normal"))
