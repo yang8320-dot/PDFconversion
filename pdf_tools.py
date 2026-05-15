@@ -1,13 +1,13 @@
 import os
 import gc
 import tempfile
-import fitz
-from pypdf import PdfWriter, PdfReader
-from pdf2image import convert_from_path, pdfinfo_from_path
-from pptx import Presentation
 from utils import get_poppler_path, apply_watermark_removal, format_size
 
+# ⚠️ 啟動優化：已將 pypdf, fitz, pptx, pdf2image 移至各別函式內部 (延遲載入 Lazy Import)
+# 這樣一來，程式雙擊啟動時不需要將所有模組載入記憶體，能大幅改善「卡頓等一下下」的問題。
+
 def process_merge_pdfs(input_files, output_path, status_callback, stop_event):
+    from pypdf import PdfWriter  # 延遲載入
     merger = PdfWriter()
     total = len(input_files)
     for i, pdf in enumerate(input_files):
@@ -18,6 +18,7 @@ def process_merge_pdfs(input_files, output_path, status_callback, stop_event):
     merger.close()
 
 def process_images_to_pdf(input_files, output_path, status_callback, stop_event):
+    import fitz  # 延遲載入
     """將多張圖片合併成單一 PDF"""
     doc = fitz.open()
     total = len(input_files)
@@ -33,6 +34,7 @@ def process_images_to_pdf(input_files, output_path, status_callback, stop_event)
     doc.close()
 
 def process_protect_pdf(input_file, output_path, password, status_callback, stop_event):
+    from pypdf import PdfWriter, PdfReader
     status_callback("🔒 正在讀取並加密 PDF...", 0.3)
     reader = PdfReader(input_file)
     writer = PdfWriter()
@@ -44,6 +46,7 @@ def process_protect_pdf(input_file, output_path, password, status_callback, stop
     with open(output_path, "wb") as f: writer.write(f)
 
 def process_unlock_pdf(input_file, output_path, password, status_callback, stop_event):
+    from pypdf import PdfWriter, PdfReader
     """解除 PDF 保全密碼"""
     status_callback("🔓 正在嘗試解鎖 PDF...", 0.3)
     reader = PdfReader(input_file)
@@ -70,6 +73,7 @@ def parse_page_ranges(range_str, total_pages):
     return sorted([p for p in pages if 0 <= p < total_pages])
 
 def process_split_pdf(input_file, output_path, page_ranges, status_callback, stop_event):
+    from pypdf import PdfWriter, PdfReader
     """分割或提取指定範圍的 PDF 頁面"""
     reader = PdfReader(input_file)
     total_pages = len(reader.pages)
@@ -93,6 +97,7 @@ def process_split_pdf(input_file, output_path, page_ranges, status_callback, sto
         with open(output_path, "wb") as f: writer.write(f)
 
 def process_rotate_pdf(input_file, output_path, angle, status_callback, stop_event):
+    from pypdf import PdfWriter, PdfReader
     """旋轉 PDF 頁面"""
     status_callback("🔄 正在旋轉 PDF...", 0.5)
     reader = PdfReader(input_file)
@@ -105,6 +110,7 @@ def process_rotate_pdf(input_file, output_path, angle, status_callback, stop_eve
     with open(output_path, "wb") as f: writer.write(f)
 
 def process_add_watermark(input_file, output_path, text, status_callback, stop_event):
+    import fitz
     """添加文字浮水印"""
     doc = fitz.open(input_file)
     total = len(doc)
@@ -118,6 +124,7 @@ def process_add_watermark(input_file, output_path, text, status_callback, stop_e
     doc.close()
 
 def process_pdf_to_images(input_file, output_dir, status_callback, stop_event, dpi=300):
+    from pdf2image import convert_from_path, pdfinfo_from_path
     poppler = get_poppler_path()
     info = pdfinfo_from_path(input_file, poppler_path=poppler)
     total = info["Pages"]
@@ -131,6 +138,9 @@ def process_pdf_to_images(input_file, output_dir, status_callback, stop_event, d
         del page_img; gc.collect()
 
 def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi=300):
+    from pptx import Presentation
+    from pdf2image import convert_from_path, pdfinfo_from_path
+    
     poppler = get_poppler_path()
     is_pdf = input_file.lower().endswith('.pdf')
     
@@ -170,6 +180,9 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
             prs.save(output_path)
 
 def process_remove_watermark(input_file, output_path, status_callback, stop_event, dpi=300, position="右下角"):
+    from pdf2image import convert_from_path, pdfinfo_from_path
+    from pptx import Presentation
+    
     poppler = get_poppler_path()
     info = pdfinfo_from_path(input_file, poppler_path=poppler)
     total = info["Pages"]
@@ -191,8 +204,8 @@ def process_remove_watermark(input_file, output_path, status_callback, stop_even
         status_callback("💾 正在組合寫入檔案...", 0.9)
         
         if output_path.lower().endswith('.pptx'):
-            prs = Presentation()
             from PIL import Image
+            prs = Presentation()
             with Image.open(temp_images[0]) as first_img: width_px, height_px = first_img.size
             prs.slide_width = int(width_px * 914400 / dpi) 
             prs.slide_height = int(height_px * 914400 / dpi)
@@ -202,6 +215,7 @@ def process_remove_watermark(input_file, output_path, status_callback, stop_even
                 slide.shapes.add_picture(img_path, 0, 0, prs.slide_width, prs.slide_height)
             prs.save(output_path)
         else:
+            import fitz
             doc = fitz.open()
             for img_path in temp_images:
                 img_doc = fitz.open(img_path)
@@ -213,6 +227,7 @@ def process_remove_watermark(input_file, output_path, status_callback, stop_even
             doc.close()
 
 def process_compress_pdf(input_file, output_path, status_callback, stop_event):
+    import fitz
     status_callback("🗜️ 正在掃描與壓縮 PDF 檔案...", 0.5)
     orig_size = os.path.getsize(input_file)
     doc = fitz.open(input_file)
