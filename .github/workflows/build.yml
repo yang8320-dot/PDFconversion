@@ -59,11 +59,11 @@ jobs:
         
         $EXCLUDES = "--exclude-module matplotlib --exclude-module IPython --exclude-module pytest --exclude-module torch --exclude-module torchvision --exclude-module easyocr"
         
-        # 加入 hidden-import 確保 pythoncom 相關元件打包正確
-        $HIDDEN = "--hidden-import win32timezone --hidden-import win32com"
+        # 【修正 1】強制引入本地的 pdf_tools 與 utils，避免找不到模組
+        $HIDDEN = "--hidden-import win32timezone --hidden-import win32com --hidden-import pdf_tools --hidden-import utils"
         
-        # 針對 OCR 模型與執行環境強制打包收集
-        $OCR_INCLUDES = "--collect-data rapidocr_onnxruntime --collect-all onnxruntime"
+        # 【修正 2】加入 --collect-all opencc 確保簡繁轉換字典檔被打包
+        $OCR_INCLUDES = "--collect-data rapidocr_onnxruntime --collect-all onnxruntime --collect-all opencc"
         
         if ($MODE -eq 'Full (完整打包 - 含 Poppler 引擎與所有函式庫)') {
             pyinstaller --noconfirm --onedir --noconsole `
