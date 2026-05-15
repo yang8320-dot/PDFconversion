@@ -31,6 +31,92 @@ class CTkinterDnD(ctk.CTk, TkinterDnD.DnDWrapper):
         super().__init__(*args, **kwargs)
         self.TkdndVersion = TkinterDnD._require(self)
 
+# ==========================================
+# 新增：PDF 合併排序專用管理視窗
+# ==========================================
+class MergeManagerWindow(ctk.CTkToplevel):
+    def __init__(self, parent, initial_files, start_callback):
+        super().__init__(parent)
+        self.title("PDF 合併管理器 - 調整順序")
+        self.geometry("650x400")
+        self.start_callback = start_callback
+        
+        # 設定為強制回應視窗 (Modal)
+        self.transient(parent)
+        self.grab_set()
+
+        # 左側：檔案列表區塊 (使用標準 tk.Listbox 以便於選取與排序)
+        list_frame = ctk.CTkFrame(self, fg_color="transparent")
+        list_frame.pack(side="left", fill="both", expand=True, padx=(20, 10), pady=20)
+        
+        ctk.CTkLabel(list_frame, text="合併檔案列表 (由上到下)：", font=("Microsoft JhengHei", 14, "bold")).pack(anchor="w", pady=(0, 5))
+        
+        scrollbar = tk.Scrollbar(list_frame)
+        scrollbar.pack(side="right", fill="y")
+        
+        self.listbox = tk.Listbox(list_frame, selectmode=tk.SINGLE, font=("Microsoft JhengHei", 11), yscrollcommand=scrollbar.set, activestyle="none")
+        self.listbox.pack(side="left", fill="both", expand=True)
+        scrollbar.config(command=self.listbox.yview)
+        
+        for f in initial_files:
+            self.listbox.insert(tk.END, f)
+            
+        # 右側：操作按鈕區塊
+        btn_frame = ctk.CTkFrame(self)
+        btn_frame.pack(side="right", fill="y", padx=(10, 20), pady=20)
+        
+        ctk.CTkButton(btn_frame, text="➕ 新增檔案", command=self.add_files).pack(pady=(10, 5))
+        ctk.CTkButton(btn_frame, text="⬆️ 上移", command=self.move_up).pack(pady=5)
+        ctk.CTkButton(btn_frame, text="⬇️ 下移", command=self.move_down).pack(pady=5)
+        ctk.CTkButton(btn_frame, text="❌ 移除", command=self.remove_item, fg_color="#cc3333", hover_color="#aa2222").pack(pady=5)
+        
+        ctk.CTkButton(btn_frame, text="🚀 開始合併", command=self.start_merge, fg_color="#28a745", hover_color="#218838", height=40, font=("Microsoft JhengHei", 14, "bold")).pack(side="bottom", pady=(20, 10))
+
+    def add_files(self):
+        new_files = filedialog.askopenfilenames(title="選擇要新增的 PDF", filetypes=[("PDF Files", "*.pdf")])
+        for f in new_files:
+            self.listbox.insert(tk.END, f)
+
+    def move_up(self):
+        try:
+            idx = self.listbox.curselection()[0]
+            if idx > 0:
+                val = self.listbox.get(idx)
+                self.listbox.delete(idx)
+                self.listbox.insert(idx - 1, val)
+                self.listbox.select_set(idx - 1)
+        except IndexError: pass
+
+    def move_down(self):
+        try:
+            idx = self.listbox.curselection()[0]
+            if idx < self.listbox.size() - 1:
+                val = self.listbox.get(idx)
+                self.listbox.delete(idx)
+                self.listbox.insert(idx + 1, val)
+                self.listbox.select_set(idx + 1)
+        except IndexError: pass
+
+    def remove_item(self):
+        try:
+            idx = self.listbox.curselection()[0]
+            self.listbox.delete(idx)
+            # 刪除後自動選取下一個
+            if self.listbox.size() > 0:
+                self.listbox.select_set(min(idx, self.listbox.size() - 1))
+        except IndexError: pass
+
+    def start_merge(self):
+        final_list = list(self.listbox.get(0, tk.END))
+        if len(final_list) < 2:
+            messagebox.showwarning("警告", "合併功能需要至少兩個檔案！")
+            return
+        self.start_callback(final_list)
+        self.destroy()
+
+# ==========================================
+# 主應用程式
+# ==========================================
 class PDFToolApp:
     def __init__(self, root):
         self.root = root
@@ -40,7 +126,7 @@ class PDFToolApp:
         ctk.set_default_color_theme("blue")  
 
         self.mode_var = ctk.StringVar(value="PPT")
-        self.stop_event = threading.Event() # 用於中斷任務
+        self.stop_event = threading.Event() 
 
         # 頂部標題
         ctk.CTkLabel(self.root, text="PDFconversion 專業工具集", font=("Microsoft JhengHei", 24, "bold"), text_color="#333").pack(pady=(15, 5))
@@ -113,18 +199,20 @@ class PDFToolApp:
         if not valid_files: return messagebox.showerror("錯誤", "請提供有效的檔案！")
 
         first_file_name = os.path.splitext(os.path.basename(valid_files[0]))[0]
-        output_path = None
 
+        # 如果是合併模式，跳出排序管理器，中斷當前流程
         if mode == "MERGE":
-            if len(valid_files) < 2: return messagebox.showwarning("警告", "合併需要至少兩個檔案！")
-            output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_merged.pdf", defaultextension=".pdf")
-        elif mode in ["SPLIT", "PDF2IMG"]:
+            MergeManagerWindow(self.root, valid_files, lambda sorted_files: self.trigger_merge_process(sorted_files, first_file_name))
+            return
+
+        output_path = None
+        if mode in ["SPLIT", "PDF2IMG"]:
             output_path = filedialog.askdirectory(title="選擇儲存資料夾")
         elif mode == "PROTECT":
             pwd = ctk.CTkInputDialog(text="請輸入密碼：", title="加密").get_input()
             if not pwd: return
             output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_protected.pdf", defaultextension=".pdf")
-            valid_files = [valid_files[0], pwd] # 借用陣列傳密碼
+            valid_files = [valid_files[0], pwd] 
         elif mode == "COMPRESS":
             output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_compressed.pdf", defaultextension=".pdf")
         elif mode in ["PPT", "WORD"]:
@@ -137,6 +225,12 @@ class PDFToolApp:
 
         if output_path:
             self.start_thread(mode, valid_files, output_path)
+
+    def trigger_merge_process(self, sorted_files, first_file_name):
+        """ 由 MergeManagerWindow 觸發的實際合併儲存流程 """
+        output_path = filedialog.asksaveasfilename(title="儲存合併後的 PDF", initialfile=f"{first_file_name}_merged.pdf", defaultextension=".pdf", filetypes=[("PDF Files", "*.pdf")])
+        if output_path:
+            self.start_thread("MERGE", sorted_files, output_path)
 
     def start_thread(self, mode, input_data, output_data):
         self.set_ui_state("disabled")
