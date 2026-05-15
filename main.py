@@ -7,7 +7,7 @@ from tkinter import filedialog, messagebox
 from tkinterdnd2 import DND_FILES, TkinterDnD
 import customtkinter as ctk
 
-from pdf_tools import process_merge_pdfs, process_protect_pdf, process_split_pdf, process_pdf_to_images, process_compress_pdf, process_rebuild_pdf
+from pdf_tools import process_merge_pdfs, process_protect_pdf, process_split_pdf, process_pdf_to_images, process_compress_pdf, process_remove_watermark
 from ocr_to_ppt import process_ocr_to_ppt
 from ocr_to_word import process_ocr_to_word
 
@@ -33,13 +33,13 @@ class MergeManagerWindow(ctk.CTkToplevel):
     def __init__(self, parent, initial_files, start_callback):
         super().__init__(parent)
         self.title("PDF 合併管理器 - 調整順序")
-        self.geometry("650x400")
+        self.geometry("600x350")
         self.start_callback = start_callback
         self.transient(parent)
         self.grab_set()
 
         list_frame = ctk.CTkFrame(self, fg_color="transparent")
-        list_frame.pack(side="left", fill="both", expand=True, padx=(20, 10), pady=20)
+        list_frame.pack(side="left", fill="both", expand=True, padx=(15, 5), pady=15)
         ctk.CTkLabel(list_frame, text="合併檔案列表 (由上到下)：", font=("Microsoft JhengHei", 14, "bold")).pack(anchor="w", pady=(0, 5))
         
         scrollbar = tk.Scrollbar(list_frame)
@@ -51,45 +51,33 @@ class MergeManagerWindow(ctk.CTkToplevel):
         for f in initial_files: self.listbox.insert(tk.END, f)
             
         btn_frame = ctk.CTkFrame(self)
-        btn_frame.pack(side="right", fill="y", padx=(10, 20), pady=20)
+        btn_frame.pack(side="right", fill="y", padx=(5, 15), pady=15)
         
-        ctk.CTkButton(btn_frame, text="➕ 新增檔案", command=self.add_files).pack(pady=(10, 5))
+        ctk.CTkButton(btn_frame, text="➕ 新增檔案", command=self.add_files).pack(pady=(5, 5))
         ctk.CTkButton(btn_frame, text="⬆️ 上移", command=self.move_up).pack(pady=5)
         ctk.CTkButton(btn_frame, text="⬇️ 下移", command=self.move_down).pack(pady=5)
         ctk.CTkButton(btn_frame, text="❌ 移除", command=self.remove_item, fg_color="#cc3333", hover_color="#aa2222").pack(pady=5)
-        ctk.CTkButton(btn_frame, text="🚀 開始合併", command=self.start_merge, fg_color="#28a745", hover_color="#218838", height=40, font=("Microsoft JhengHei", 14, "bold")).pack(side="bottom", pady=(20, 10))
+        ctk.CTkButton(btn_frame, text="🚀 開始合併", command=self.start_merge, fg_color="#28a745", hover_color="#218838", height=35, font=("Microsoft JhengHei", 14, "bold")).pack(side="bottom", pady=(15, 5))
 
     def add_files(self):
-        new_files = filedialog.askopenfilenames(title="選擇新增檔案", filetypes=[("PDF", "*.pdf")])
-        for f in new_files: self.listbox.insert(tk.END, f)
-
+        for f in filedialog.askopenfilenames(title="選擇新增檔案", filetypes=[("PDF", "*.pdf")]): self.listbox.insert(tk.END, f)
     def move_up(self):
         try:
             idx = self.listbox.curselection()[0]
             if idx > 0:
-                val = self.listbox.get(idx)
-                self.listbox.delete(idx)
-                self.listbox.insert(idx - 1, val)
-                self.listbox.select_set(idx - 1)
+                val = self.listbox.get(idx); self.listbox.delete(idx); self.listbox.insert(idx - 1, val); self.listbox.select_set(idx - 1)
         except: pass
-
     def move_down(self):
         try:
             idx = self.listbox.curselection()[0]
             if idx < self.listbox.size() - 1:
-                val = self.listbox.get(idx)
-                self.listbox.delete(idx)
-                self.listbox.insert(idx + 1, val)
-                self.listbox.select_set(idx + 1)
+                val = self.listbox.get(idx); self.listbox.delete(idx); self.listbox.insert(idx + 1, val); self.listbox.select_set(idx + 1)
         except: pass
-
     def remove_item(self):
         try:
-            idx = self.listbox.curselection()[0]
-            self.listbox.delete(idx)
+            idx = self.listbox.curselection()[0]; self.listbox.delete(idx)
             if self.listbox.size() > 0: self.listbox.select_set(min(idx, self.listbox.size() - 1))
         except: pass
-
     def start_merge(self):
         final_list = list(self.listbox.get(0, tk.END))
         if len(final_list) < 2: return messagebox.showwarning("警告", "需要至少兩個檔案！")
@@ -99,45 +87,44 @@ class MergeManagerWindow(ctk.CTkToplevel):
 class PDFToolApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("PDFconversion - 專業多功能工具 (Pro)")
-        self.root.geometry("880x680")
+        self.root.title("PDF工具")
+        # 縮小視窗高度
+        self.root.geometry("820x380")
         ctk.set_appearance_mode("light")  
         ctk.set_default_color_theme("blue")  
 
         self.mode_var = ctk.StringVar(value="PPT")
         self.stop_event = threading.Event() 
 
-        ctk.CTkLabel(self.root, text="PDFconversion 專業工具集", font=("Microsoft JhengHei", 24, "bold"), text_color="#333").pack(pady=(15, 5))
-
-        # 功能選擇區塊 (修正文字與新增重建PDF模式)
+        # 功能選擇區塊
         mode_frame = ctk.CTkFrame(self.root, fg_color="transparent")
-        mode_frame.pack(fill="x", padx=20, pady=5)
+        mode_frame.pack(fill="x", padx=15, pady=(15, 5))
         
-        modes1 = [("PDF 轉 PPT (OCR)", "PPT"), ("PDF 轉 Word (OCR)", "WORD"), ("圖片重建 PDF", "REBUILD"), ("合併 PDF", "MERGE")]
+        modes1 = [("PDF 轉 PPT (OCR)", "PPT"), ("PDF 轉 Word (OCR)", "WORD"), ("NotebookLM 去浮水印", "RMWATERMARK"), ("合併 PDF", "MERGE")]
         modes2 = [("分割 PDF", "SPLIT"), ("加密 PDF", "PROTECT"), ("PDF 轉圖片", "PDF2IMG"), ("PDF 壓縮", "COMPRESS")]
         
         for i, (text, val) in enumerate(modes1):
-            ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 13)).grid(row=0, column=i, padx=10, pady=5)
+            ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 13)).grid(row=0, column=i, padx=8, pady=5)
         for i, (text, val) in enumerate(modes2):
-            ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 13)).grid(row=1, column=i, padx=10, pady=5)
+            ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 13)).grid(row=1, column=i, padx=8, pady=5)
 
-        # 進階設定區塊 (加入去浮水印)
+        # 進階設定區塊 (預設改為 False)
         opt_frame = ctk.CTkFrame(self.root, fg_color="#eef5fa", corner_radius=10)
-        opt_frame.pack(fill="x", padx=30, pady=5)
+        opt_frame.pack(fill="x", padx=15, pady=5)
         
-        self.use_gpu_var = ctk.BooleanVar(value=True)
-        self.white_bg_var = ctk.BooleanVar(value=True)
-        self.rm_watermark_var = ctk.BooleanVar(value=False)
+        self.use_gpu_var = ctk.BooleanVar(value=False)
+        self.white_bg_var = ctk.BooleanVar(value=False)
         
         ctk.CTkLabel(opt_frame, text="⚙️ 進階設定:", font=("Microsoft JhengHei", 12, "bold")).pack(side="left", padx=15, pady=5)
-        ctk.CTkCheckBox(opt_frame, text="抹除右下角浮水印", variable=self.rm_watermark_var, font=("Microsoft JhengHei", 12), text_color="red").pack(side="left", padx=10)
-        ctk.CTkCheckBox(opt_frame, text="啟用 GPU", variable=self.use_gpu_var, font=("Microsoft JhengHei", 12)).pack(side="left", padx=10)
-        ctk.CTkCheckBox(opt_frame, text="PPT 白底覆蓋", variable=self.white_bg_var, font=("Microsoft JhengHei", 12)).pack(side="left", padx=10)
+        ctk.CTkCheckBox(opt_frame, text="啟用 GPU 加速 (需 NVIDIA 顯卡)", variable=self.use_gpu_var, font=("Microsoft JhengHei", 12)).pack(side="left", padx=10)
+        ctk.CTkCheckBox(opt_frame, text="PPT 自動白底覆蓋 (適合白底文件)", variable=self.white_bg_var, font=("Microsoft JhengHei", 12)).pack(side="left", padx=10)
 
-        # 拖曳放置區塊
-        self.drop_frame = ctk.CTkFrame(self.root, fg_color="#f9f9f9", border_width=2, border_color="#3a7ebf", corner_radius=15)
-        self.drop_frame.pack(expand=True, fill="both", padx=30, pady=10)
-        self.status_label = ctk.CTkLabel(self.drop_frame, text="📁 將檔案拖曳至此 或 點擊選擇檔案\n支援批次處理", font=("Microsoft JhengHei", 16, "bold"), text_color="#555")
+        # 拖曳放置區塊 (高度縮減 70%，改用固定高度，不使用 expand=True)
+        self.drop_frame = ctk.CTkFrame(self.root, fg_color="#f9f9f9", border_width=2, border_color="#3a7ebf", corner_radius=15, height=80)
+        self.drop_frame.pack(fill="x", padx=15, pady=10)
+        self.drop_frame.pack_propagate(False) # 鎖定高度
+        
+        self.status_label = ctk.CTkLabel(self.drop_frame, text="📁 將檔案拖曳至此 或 點擊選擇檔案", font=("Microsoft JhengHei", 14, "bold"), text_color="#555")
         self.status_label.pack(expand=True)
         
         self.drop_frame.bind("<Button-1>", lambda e: self.browse_file())
@@ -147,11 +134,11 @@ class PDFToolApp:
 
         # 底部進度條
         bottom_frame = ctk.CTkFrame(self.root, fg_color="transparent")
-        bottom_frame.pack(fill="x", padx=30, pady=(0, 20))
+        bottom_frame.pack(fill="x", padx=15, pady=(0, 10))
         self.progress_bar = ctk.CTkProgressBar(bottom_frame)
         self.progress_bar.pack(side="left", expand=True, fill="x", padx=(0, 10))
         self.progress_bar.set(0)
-        self.cancel_btn = ctk.CTkButton(bottom_frame, text="取消任務", fg_color="#cc3333", hover_color="#aa2222", state="disabled", command=self.cancel_task, width=100)
+        self.cancel_btn = ctk.CTkButton(bottom_frame, text="取消任務", fg_color="#cc3333", hover_color="#aa2222", state="disabled", command=self.cancel_task, width=90)
         self.cancel_btn.pack(side="right")
 
     def cancel_task(self):
@@ -164,7 +151,7 @@ class PDFToolApp:
 
     def browse_file(self):
         mode = self.mode_var.get()
-        if mode in ["PPT", "WORD", "PDF2IMG", "REBUILD"]:
+        if mode in ["PPT", "WORD", "PDF2IMG", "RMWATERMARK"]:
             file_paths = filedialog.askopenfilenames(title="選擇檔案", filetypes=[("PDF/Images", "*.pdf;*.jpg;*.png")])
         else:
             file_paths = filedialog.askopenfilenames(title="選擇檔案", filetypes=[("PDF Files", "*.pdf")])
@@ -191,8 +178,8 @@ class PDFToolApp:
             valid_files = [valid_files[0], pwd] 
         elif mode == "COMPRESS":
             output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_compressed.pdf", defaultextension=".pdf")
-        elif mode == "REBUILD":
-            output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_clean.pdf", defaultextension=".pdf")
+        elif mode == "RMWATERMARK":
+            output_path = filedialog.asksaveasfilename(title="儲存去浮水印檔案 (可選 PDF 或 PPT)", initialfile=f"{first_file_name}_clean", defaultextension=".pdf", filetypes=[("PDF 檔案", "*.pdf"), ("PowerPoint 檔案", "*.pptx")])
         elif mode in ["PPT", "WORD"]:
             if len(valid_files) == 1:
                 ext = ".pptx" if mode == "PPT" else ".docx"
@@ -237,13 +224,12 @@ class PDFToolApp:
             if mode == "MERGE": process_merge_pdfs(input_data, output_data, **kwargs)
             elif mode == "SPLIT": process_split_pdf(input_data[0], output_data, **kwargs)
             elif mode == "PROTECT": process_protect_pdf(input_data[0], output_data, input_data[1], **kwargs)
-            elif mode == "PDF2IMG": process_pdf_to_images(input_data[0], output_data, rm_wm=self.rm_watermark_var.get(), **kwargs)
+            elif mode == "PDF2IMG": process_pdf_to_images(input_data[0], output_data, **kwargs)
             elif mode == "COMPRESS": process_compress_pdf(input_data[0], output_data, **kwargs)
-            elif mode == "REBUILD": process_rebuild_pdf(input_data[0], output_data, rm_wm=self.rm_watermark_var.get(), **kwargs)
+            elif mode == "RMWATERMARK": process_remove_watermark(input_data[0], output_data, **kwargs)
             elif mode in ["PPT", "WORD"]:
                 ocr_kwargs = kwargs.copy()
                 ocr_kwargs['use_gpu'] = self.use_gpu_var.get()
-                ocr_kwargs['rm_wm'] = self.rm_watermark_var.get()
                 if mode == "PPT": ocr_kwargs['white_bg'] = self.white_bg_var.get()
                 
                 if input_data[0] == "BATCH_MODE":
@@ -263,10 +249,10 @@ class PDFToolApp:
             if self.stop_event.is_set():
                 self.update_status("⛔ 任務已取消", 0)
             else:
-                self.update_status("✅ 任務完成！可以繼續處理下一個檔案", 1)
+                self.update_status("✅ 任務完成！", 1)
                 messagebox.showinfo("完成", "作業成功！檔案已處理完成。")
         except Exception as e:
-            self.update_status("❌ 發生錯誤，請重試", 0)
+            self.update_status("❌ 發生錯誤", 0)
             messagebox.showerror("錯誤", f"執行錯誤：\n{e}")
         finally:
             self.root.after(0, lambda: self.set_ui_state("normal"))
