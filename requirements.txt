@@ -1,7 +1,5 @@
-easyocr
 pdf2image
 python-pptx
-python-docx
 pypdf
 PyMuPDF
 pyinstaller
