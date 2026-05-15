@@ -1,14 +1,13 @@
-name: Manual Build OCR Tool Portable
+name: Manual Build PDFconversion Portable
 
 on:
   workflow_dispatch:
     inputs:
       version_name:
-        description: '版本名稱 (例如: v1.0.0)'
+        description: '版本名稱 (例如: v2.0.0)'
         required: true
-        default: 'v1.0.0'
+        default: 'v2.0.0'
 
-# 賦予 GitHub Actions 寫入權限 (給 Release 使用)
 permissions:
   contents: write
 
@@ -31,42 +30,53 @@ jobs:
         pip install pyinstaller
         pip install -r requirements.txt
 
-    - name: Download and Prep Poppler
+    - name: Download and Prep Poppler & EasyOCR Models
+      shell: pwsh
       run: |
-        # 下載 Poppler Windows 執行檔
+        # 1. 準備 Poppler
         Invoke-WebRequest -Uri "https://github.com/oschwartz10612/poppler-windows/releases/download/v24.02.0-0/Release-24.02.0-0.zip" -OutFile "poppler.zip"
         Expand-Archive -Path "poppler.zip" -DestinationPath "poppler_temp"
-        
-        # 建立 Library/poppler_bin 資料夾，並將檔案移入
-        New-Item -ItemType Directory -Path "Library/poppler_bin"
+        New-Item -ItemType Directory -Path "Library/poppler_bin" -Force
         Copy-Item -Path "poppler_temp/poppler-24.02.0/Library/bin/*" -Destination "Library/poppler_bin" -Recurse
+
+        # 2. 準備 EasyOCR 離線模型 (解決 407 Proxy Error)
+        New-Item -ItemType Directory -Path "Library/model" -Force
+        $models = @(
+            "https://github.com/JaidedAI/EasyOCR/releases/download/v1.3/craft_mlt_25k.zip",
+            "https://github.com/JaidedAI/EasyOCR/releases/download/v1.3/zh_sim_g2.zip",
+            "https://github.com/JaidedAI/EasyOCR/releases/download/v1.3/zh_tra_g2.zip",
+            "https://github.com/JaidedAI/EasyOCR/releases/download/v1.3/english_g2.zip"
+        )
+        foreach ($url in $models) {
+            $filename = [System.IO.Path]::GetFileName($url)
+            Invoke-WebRequest -Uri $url -OutFile $filename
+            Expand-Archive -Path $filename -DestinationPath "Library/model" -Force
+        }
 
     - name: Build Executable (Portable Structure)
       run: |
-        # 使用 PyInstaller 打包
+        # 將所有相依套件放入 Library，主程式命名為 PDFconversion
         pyinstaller --noconfirm --onedir --noconsole `
           --contents-directory "Library" `
           --add-data "Library/poppler_bin;Library/poppler_bin" `
+          --add-data "Library/model;Library/model" `
           --collect-all tkinterdnd2 `
-          --name "PDF_to_PPT_OCR" `
+          --collect-all customtkinter `
+          --name "PDFconversion" `
           main.py
 
     - name: Package to Zip
       shell: pwsh
       run: |
-        # 根據手動輸入的版本號命名壓縮檔
         $VERSION = "${{ github.event.inputs.version_name }}"
-        Compress-Archive -Path dist/PDF_to_PPT_OCR/* -DestinationPath "PDF_to_PPT_OCR_Portable_$VERSION.zip"
+        Compress-Archive -Path dist/PDFconversion/* -DestinationPath "PDFconversion_Portable_$VERSION.zip"
 
-    # ==========================================
-    # 新增這段：將檔案上傳到 Actions 頁面的 Artifacts 區塊
-    # ==========================================
     - name: Upload Build Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: PDF_to_PPT_OCR_Portable_${{ github.event.inputs.version_name }}
-        path: PDF_to_PPT_OCR_Portable_${{ github.event.inputs.version_name }}.zip
-        retention-days: 90 # Artifact 預設保留天數 (最長 90 天)
+        name: PDFconversion_Portable_${{ github.event.inputs.version_name }}
+        path: PDFconversion_Portable_${{ github.event.inputs.version_name }}.zip
+        retention-days: 90
 
     - name: Create Release
       uses: softprops/action-gh-release@v1
