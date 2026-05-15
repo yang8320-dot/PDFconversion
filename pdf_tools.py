@@ -59,7 +59,7 @@ def process_unlock_pdf(input_file, output_path, password, status_callback, stop_
     status_callback("🔓 正在寫入無密碼檔案...", 0.7)
     with open(output_path, "wb") as f: writer.write(f)
 
-# --- 頁面操作 (提取/分割、刪除、插入空白頁、旋轉) ---
+# --- 頁面操作 ---
 
 def parse_page_ranges(range_str, total_pages):
     if not range_str.strip(): return list(range(total_pages))
@@ -105,9 +105,7 @@ def process_remove_pages(input_file, output_path, page_ranges, status_callback, 
     for i in range(total_pages):
         if stop_event.is_set(): return
         status_callback(f"🗑️ 正在掃描並剔除頁面 ({i+1}/{total_pages})...", (i+1)/total_pages)
-        if i not in pages_to_remove:
-            writer.add_page(reader.pages[i])
-            
+        if i not in pages_to_remove: writer.add_page(reader.pages[i])
     with open(output_path, "wb") as f: writer.write(f)
 
 def process_insert_blank_page(input_file, output_path, page_ranges, status_callback, stop_event):
@@ -122,11 +120,19 @@ def process_insert_blank_page(input_file, output_path, page_ranges, status_callb
         status_callback(f"📎 正在處理並插入空白頁 ({i+1}/{total_pages})...", (i+1)/total_pages)
         page = reader.pages[i]
         writer.add_page(page)
-        
-        # 若當前頁碼在使用者指定的範圍內，則在該頁「之後」加入一張同尺寸空白頁
-        if i in insert_after:
-            writer.add_blank_page(width=page.mediabox.width, height=page.mediabox.height)
-            
+        if i in insert_after: writer.add_blank_page(width=page.mediabox.width, height=page.mediabox.height)
+    with open(output_path, "wb") as f: writer.write(f)
+
+def process_reorder_pages(input_file, output_path, order_str, status_callback, stop_event):
+    from pypdf import PdfWriter, PdfReader
+    reader = PdfReader(input_file)
+    writer = PdfWriter()
+    # 將使用者輸入的 "3, 1, 2" 轉為索引 [2, 0, 1]
+    indices = [int(x.strip())-1 for x in order_str.split(",") if x.strip().isdigit()]
+    for i, idx in enumerate(indices):
+        if stop_event.is_set(): return
+        status_callback(f"🔀 正在重新排序... ({i+1}/{len(indices)})", (i+1)/len(indices))
+        if 0 <= idx < len(reader.pages): writer.add_page(reader.pages[idx])
     with open(output_path, "wb") as f: writer.write(f)
 
 def process_rotate_pdf(input_file, output_path, angle, status_callback, stop_event):
@@ -141,26 +147,38 @@ def process_rotate_pdf(input_file, output_path, angle, status_callback, stop_eve
         writer.pages[-1].rotate(angle_int)
     with open(output_path, "wb") as f: writer.write(f)
 
-# --- 辦公室實用工具 (轉黑白、提取文字、壓縮) ---
+# --- 辦公室修改/編輯工具 ---
+
+def process_add_page_numbers(input_file, output_path, status_callback, stop_event):
+    import fitz
+    doc = fitz.open(input_file)
+    total = len(doc)
+    for i in range(total):
+        if stop_event.is_set(): return
+        status_callback(f"🔢 正在加入頁碼 ({i+1}/{total})...", (i+1)/total)
+        page = doc[i]
+        rect = page.rect
+        text = f"- {i+1} -"
+        # 計算底部置中位置 (粗略計算)
+        p = fitz.Point(rect.width / 2 - 15, rect.height - 20)
+        page.insert_text(p, text, fontsize=11, color=(0, 0, 0))
+    doc.save(output_path)
+    doc.close()
 
 def process_to_grayscale(input_file, output_path, status_callback, stop_event, dpi=200):
     import fitz
     doc = fitz.open(input_file)
     new_doc = fitz.open()
     total = len(doc)
-    
     for i in range(total):
         if stop_event.is_set(): return
         status_callback(f"🖨️ 正在轉換為黑白/灰階 ({i+1}/{total})...", (i+1)/total)
         page = doc[i]
-        # 利用 PyMuPDF 將頁面渲染為灰階圖片並重新封裝 (保證列印不糊)
         pix = page.get_pixmap(dpi=dpi, colorspace=fitz.csGRAY)
         new_page = new_doc.new_page(width=page.rect.width, height=page.rect.height)
         new_page.insert_image(page.rect, pixmap=pix)
-        
     new_doc.save(output_path, garbage=4, deflate=True)
-    doc.close()
-    new_doc.close()
+    doc.close(); new_doc.close()
 
 def process_extract_text(input_file, output_path, status_callback, stop_event):
     import fitz
@@ -174,6 +192,25 @@ def process_extract_text(input_file, output_path, status_callback, stop_event):
             f.write(f"--- 第 {i+1} 頁 ---\n")
             f.write(text + "\n\n")
     doc.close()
+
+def process_extract_original_images(input_file, output_dir, status_callback, stop_event):
+    import fitz
+    doc = fitz.open(input_file)
+    total = len(doc)
+    count = 0
+    for i in range(total):
+        if stop_event.is_set(): return
+        status_callback(f"🖼️ 正在提取內嵌圖片 (掃描第 {i+1} 頁)...", (i+1)/total)
+        for img_idx, img in enumerate(doc[i].get_images(True)):
+            xref = img[0]
+            base_img = doc.extract_image(xref)
+            img_bytes = base_img["image"]
+            ext = base_img["ext"]
+            with open(os.path.join(output_dir, f"page{i+1}_img{img_idx+1}.{ext}"), "wb") as f:
+                f.write(img_bytes)
+            count += 1
+    doc.close()
+    return f"提取完成！\n共從檔案中成功提取了 {count} 張原始圖片。"
 
 def process_compress_pdf(input_file, output_path, status_callback, stop_event):
     import fitz
@@ -253,7 +290,6 @@ def process_pdf_to_images(input_file, output_dir, status_callback, stop_event, d
     info = pdfinfo_from_path(input_file, poppler_path=poppler)
     total = info["Pages"]
     base_name = os.path.splitext(os.path.basename(input_file))[0]
-    
     for i in range(1, total + 1):
         if stop_event.is_set(): break
         status_callback(f"🖼️ 正在處理並儲存圖片 {i} / {total}...", i/total)
@@ -264,7 +300,6 @@ def process_pdf_to_images(input_file, output_dir, status_callback, stop_event, d
 def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi=300):
     from pptx import Presentation
     from pdf2image import convert_from_path, pdfinfo_from_path
-    
     poppler = get_poppler_path()
     is_pdf = input_file.lower().endswith('.pdf')
     
@@ -277,14 +312,11 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
                 if stop_event.is_set(): break
                 status_callback(f"🖼️ 正在轉換圖片並寫入 PPT (第 {i} / {total} 頁)...", i/total)
                 page_img = convert_from_path(input_file, dpi=dpi, first_page=i, last_page=i, poppler_path=poppler)[0]
-                
                 temp_path = os.path.join(temp_dir, f"page_{i}.jpg")
                 page_img.save(temp_path, "JPEG", quality=95)
-                
                 if i == 1:
                     prs.slide_width = int(page_img.width * 914400 / dpi)
                     prs.slide_height = int(page_img.height * 914400 / dpi)
-                    
                 slide = prs.slides.add_slide(prs.slide_layouts[6])
                 slide.shapes.add_picture(temp_path, 0, 0, prs.slide_width, prs.slide_height)
                 del page_img; gc.collect()
@@ -298,7 +330,6 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
             prs.slide_height = int(page_img.height * 914400 / dpi)
             slide = prs.slides.add_slide(prs.slide_layouts[6])
             slide.shapes.add_picture(temp_path, 0, 0, prs.slide_width, prs.slide_height)
-            
         if not stop_event.is_set():
             status_callback("💾 正在儲存 PPT 檔案...", 0.95)
             prs.save(output_path)
