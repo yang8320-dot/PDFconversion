@@ -7,8 +7,10 @@ from tkinter import filedialog, messagebox
 from tkinterdnd2 import DND_FILES, TkinterDnD
 import customtkinter as ctk
 
-# 移除了所有 ocr 模組的匯入，並匯入新的 process_pdf_to_ppt
-from pdf_tools import process_merge_pdfs, process_protect_pdf, process_split_pdf, process_pdf_to_images, process_compress_pdf, process_remove_watermark, process_pdf_to_ppt
+from pdf_tools import (process_merge_pdfs, process_protect_pdf, process_split_pdf, process_pdf_to_images, 
+                       process_compress_pdf, process_remove_watermark, process_pdf_to_ppt, 
+                       process_images_to_pdf, process_unlock_pdf, process_rotate_pdf, process_add_watermark)
+from utils import check_poppler_exists, open_file_or_folder
 
 def check_single_instance():
     mutex_name = "Global\\PDF_TOOL_MUTEX"
@@ -28,12 +30,14 @@ class CTkinterDnD(ctk.CTk, TkinterDnD.DnDWrapper):
         super().__init__(*args, **kwargs)
         self.TkdndVersion = TkinterDnD._require(self)
 
-class MergeManagerWindow(ctk.CTkToplevel):
-    def __init__(self, parent, initial_files, start_callback):
+class ListManagerWindow(ctk.CTkToplevel):
+    """用於合併 PDF 或圖片轉 PDF 的清單管理器"""
+    def __init__(self, parent, initial_files, mode, start_callback):
         super().__init__(parent)
-        self.title("PDF 合併管理器")
+        self.title("檔案合併管理器")
         self.geometry("600x350")
         self.start_callback = start_callback
+        self.mode = mode
         self.transient(parent)
         self.grab_set()
 
@@ -50,7 +54,9 @@ class MergeManagerWindow(ctk.CTkToplevel):
             
         btn_frame = ctk.CTkFrame(self)
         btn_frame.pack(side="right", fill="y", padx=(5, 15), pady=15)
-        ctk.CTkButton(btn_frame, text="➕ 新增檔案", command=lambda: [self.listbox.insert(tk.END, f) for f in filedialog.askopenfilenames(filetypes=[("PDF", "*.pdf")])]).pack(pady=5)
+        
+        file_types = [("PDF", "*.pdf")] if mode == "MERGE" else [("Images", "*.jpg;*.png")]
+        ctk.CTkButton(btn_frame, text="➕ 新增檔案", command=lambda: [self.listbox.insert(tk.END, f) for f in filedialog.askopenfilenames(filetypes=file_types)]).pack(pady=5)
         ctk.CTkButton(btn_frame, text="⬆️ 上移", command=self.move_up).pack(pady=5)
         ctk.CTkButton(btn_frame, text="⬇️ 下移", command=self.move_down).pack(pady=5)
         ctk.CTkButton(btn_frame, text="❌ 移除", command=self.remove_item, fg_color="#cc3333", hover_color="#aa2222").pack(pady=5)
@@ -73,42 +79,57 @@ class MergeManagerWindow(ctk.CTkToplevel):
         except: pass
     def start_merge(self):
         final_list = list(self.listbox.get(0, tk.END))
-        if len(final_list) < 2: return messagebox.showwarning("警告", "需要至少兩個檔案！")
+        if len(final_list) < 2 and self.mode == "MERGE": return messagebox.showwarning("警告", "需要至少兩個檔案！")
         self.start_callback(final_list)
         self.destroy()
 
 class PDFToolApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("PDF工具")
-        self.root.geometry("800x290")
+        self.root.title("PDF 辦公室工具")
+        self.root.geometry("800x380") # 調整視窗高度以容納更多按鈕
         ctk.set_appearance_mode("light")  
         ctk.set_default_color_theme("blue")  
+
+        if not check_poppler_exists():
+            messagebox.showwarning("元件缺失", "找不到 Poppler 渲染元件，圖片處理相關功能可能無法正常運作。")
 
         self.mode_var = ctk.StringVar(value="PPT")
         self.stop_event = threading.Event() 
 
-        # 功能選擇區塊 (移除 Word，更名為純圖片)
+        # 功能選擇區塊
         mode_frame = ctk.CTkFrame(self.root, fg_color="transparent")
         mode_frame.pack(fill="x", padx=15, pady=(10, 5))
         for i in range(4): mode_frame.grid_columnconfigure(i, weight=1, uniform="col_group")
         
-        modes1 = [("PDF 轉 PPT (純圖片)", "PPT"), ("NotebookLM 去浮水印", "RMWATERMARK"), ("合併 PDF", "MERGE"), ("分割 PDF", "SPLIT")]
-        modes2 = [("加密 PDF", "PROTECT"), ("PDF 轉圖片", "PDF2IMG"), ("PDF 壓縮", "COMPRESS"), ("", "")]
+        modes1 = [("PDF 轉 PPT (純圖片)", "PPT"), ("去浮水印", "RMWATERMARK"), ("合併 PDF", "MERGE"), ("提取/分割 PDF", "SPLIT")]
+        modes2 = [("加密 PDF", "PROTECT"), ("解鎖 PDF", "UNLOCK"), ("PDF 轉圖片", "PDF2IMG"), ("圖片轉 PDF", "IMG2PDF")]
+        modes3 = [("PDF 壓縮", "COMPRESS"), ("PDF 旋轉", "ROTATE"), ("添加文字浮水印", "ADD_WM"), ("", "")]
         
-        for i, (text, val) in enumerate(modes1):
-            ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 13)).grid(row=0, column=i, padx=5, pady=8, sticky="w")
-        for i, (text, val) in enumerate(modes2):
-            if text:
-                ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 13)).grid(row=1, column=i, padx=5, pady=8, sticky="w")
+        for i, (text, val) in enumerate(modes1): ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 13)).grid(row=0, column=i, padx=5, pady=6, sticky="w")
+        for i, (text, val) in enumerate(modes2): ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 13)).grid(row=1, column=i, padx=5, pady=6, sticky="w")
+        for i, (text, val) in enumerate(modes3): 
+            if text: ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 13)).grid(row=2, column=i, padx=5, pady=6, sticky="w")
 
-        # 進階設定區塊 (只保留畫質)
-        opt_frame = ctk.CTkFrame(self.root, fg_color="#eef5fa", corner_radius=10)
-        opt_frame.pack(fill="x", padx=15, pady=5)
+        # 進階設定區塊 (動態顯示)
+        self.opt_frame = ctk.CTkFrame(self.root, fg_color="#eef5fa", corner_radius=10)
+        self.opt_frame.pack(fill="x", padx=15, pady=5)
         
         self.quality_var = ctk.StringVar(value="原畫質 (300 DPI)")
-        ctk.CTkLabel(opt_frame, text="⚙️ 設定輸出畫質:", font=("Microsoft JhengHei", 12, "bold")).pack(side="left", padx=10, pady=5)
-        ctk.CTkOptionMenu(opt_frame, variable=self.quality_var, values=["原畫質 (300 DPI)", "高畫質 (200 DPI)", "中畫質 (150 DPI)", "低畫質 (72 DPI)"], font=("Microsoft JhengHei", 12), width=150).pack(side="left", padx=10)
+        self.wm_pos_var = ctk.StringVar(value="右下角")
+        self.rotate_var = ctk.StringVar(value="90度")
+
+        self.lbl_dpi = ctk.CTkLabel(self.opt_frame, text="⚙️ 畫質:", font=("Microsoft JhengHei", 12, "bold"))
+        self.menu_dpi = ctk.CTkOptionMenu(self.opt_frame, variable=self.quality_var, values=["原畫質 (300 DPI)", "高畫質 (200 DPI)", "中畫質 (150 DPI)", "低畫質 (72 DPI)"], width=130)
+        
+        self.lbl_wm = ctk.CTkLabel(self.opt_frame, text="📍 浮水印位置:", font=("Microsoft JhengHei", 12, "bold"))
+        self.menu_wm = ctk.CTkOptionMenu(self.opt_frame, variable=self.wm_pos_var, values=["右下角", "左下角", "右上角", "左上角"], width=100)
+
+        self.lbl_rot = ctk.CTkLabel(self.opt_frame, text="🔄 旋轉角度:", font=("Microsoft JhengHei", 12, "bold"))
+        self.menu_rot = ctk.CTkOptionMenu(self.opt_frame, variable=self.rotate_var, values=["90度", "180度", "270度"], width=90)
+
+        self.mode_var.trace_add("write", self.update_options_ui)
+        self.update_options_ui() # 初始化 UI
 
         # 拖曳區塊
         self.drop_frame = ctk.CTkFrame(self.root, fg_color="#f9f9f9", border_width=2, border_color="#3a7ebf", corner_radius=15, height=70)
@@ -127,6 +148,16 @@ class PDFToolApp:
         self.cancel_btn = ctk.CTkButton(bottom_frame, text="取消任務", fg_color="#cc3333", hover_color="#aa2222", state="disabled", command=self.cancel_task, width=90)
         self.cancel_btn.pack(side="right")
 
+    def update_options_ui(self, *args):
+        for widget in self.opt_frame.winfo_children(): widget.pack_forget()
+        mode = self.mode_var.get()
+        if mode in ["PPT", "PDF2IMG", "RMWATERMARK"]:
+            self.lbl_dpi.pack(side="left", padx=(10, 5), pady=5); self.menu_dpi.pack(side="left", padx=(0, 15))
+        if mode == "RMWATERMARK":
+            self.lbl_wm.pack(side="left", padx=(5, 5), pady=5); self.menu_wm.pack(side="left", padx=(0, 15))
+        if mode == "ROTATE":
+            self.lbl_rot.pack(side="left", padx=(10, 5), pady=5); self.menu_rot.pack(side="left", padx=(0, 15))
+
     def cancel_task(self):
         self.stop_event.set()
         self.update_status("⚠️ 正在停止任務中...", 0)
@@ -137,7 +168,7 @@ class PDFToolApp:
 
     def browse_file(self):
         mode = self.mode_var.get()
-        if mode in ["PPT", "PDF2IMG", "RMWATERMARK"]:
+        if mode in ["PPT", "PDF2IMG", "RMWATERMARK", "IMG2PDF"]:
             file_paths = filedialog.askopenfilenames(title="選擇檔案", filetypes=[("PDF/Images", "*.pdf;*.jpg;*.png")])
         else: file_paths = filedialog.askopenfilenames(title="選擇檔案", filetypes=[("PDF Files", "*.pdf")])
         if file_paths: self.process_selected_files(file_paths)
@@ -150,37 +181,66 @@ class PDFToolApp:
         first_file = valid_files[0]
         first_file_name = os.path.splitext(os.path.basename(first_file))[0]
 
-        if mode == "MERGE": return MergeManagerWindow(self.root, valid_files, lambda sf: self.trigger_merge_process(sf, first_file_name))
+        if mode in ["MERGE", "IMG2PDF"]: 
+            return ListManagerWindow(self.root, valid_files, mode, lambda sf: self.trigger_list_process(mode, sf, first_file_name))
 
         output_path = None
-        if mode in ["SPLIT", "PDF2IMG"]: output_path = filedialog.askdirectory(title="選擇儲存資料夾")
+        extra_args = {}
+        
+        if mode == "SPLIT": 
+            ranges = ctk.CTkInputDialog(text="請輸入提取頁碼 (如 1-3,5)\n若要獨立全部分割請留白：", title="提取/分割").get_input()
+            if ranges is None: return # 按下取消
+            if ranges.strip() == "":
+                output_path = filedialog.askdirectory(title="選擇分割檔儲存資料夾")
+            else:
+                output_path = filedialog.asksaveasfilename(title="儲存提取的 PDF", initialfile=f"{first_file_name}_extracted.pdf", defaultextension=".pdf")
+            extra_args["ranges"] = ranges
+
+        elif mode == "PDF2IMG": output_path = filedialog.askdirectory(title="選擇儲存資料夾")
         elif mode == "PROTECT":
-            pwd = ctk.CTkInputDialog(text="請輸入密碼：", title="加密").get_input()
+            pwd = ctk.CTkInputDialog(text="請輸入要設定的密碼：", title="加密").get_input()
             if not pwd: return
-            output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_protected.pdf", defaultextension=".pdf")
-            valid_files = [first_file, pwd] 
-        elif mode == "COMPRESS": output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_compressed.pdf", defaultextension=".pdf")
-        elif mode == "RMWATERMARK": output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_clean", defaultextension=".pdf", filetypes=[("PDF", "*.pdf"), ("PPT", "*.pptx")])
+            output_path = filedialog.asksaveasfilename(title="儲存加密 PDF", initialfile=f"{first_file_name}_protected.pdf", defaultextension=".pdf")
+            extra_args["pwd"] = pwd
+        elif mode == "UNLOCK":
+            pwd = ctk.CTkInputDialog(text="請輸入目前 PDF 的密碼：", title="解鎖").get_input()
+            if not pwd: return
+            output_path = filedialog.asksaveasfilename(title="儲存解鎖 PDF", initialfile=f"{first_file_name}_unlocked.pdf", defaultextension=".pdf")
+            extra_args["pwd"] = pwd
+        elif mode == "ADD_WM":
+            txt = ctk.CTkInputDialog(text="請輸入要添加的文字：", title="添加浮水印").get_input()
+            if not txt: return
+            output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_wm.pdf", defaultextension=".pdf")
+            extra_args["text"] = txt
+        elif mode == "ROTATE":
+            output_path = filedialog.asksaveasfilename(title="儲存旋轉後的 PDF", initialfile=f"{first_file_name}_rotated.pdf", defaultextension=".pdf")
+            extra_args["angle"] = self.rotate_var.get()
+        elif mode == "COMPRESS": 
+            output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_compressed.pdf", defaultextension=".pdf")
+        elif mode == "RMWATERMARK": 
+            output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_clean", defaultextension=".pdf", filetypes=[("PDF", "*.pdf"), ("PPT", "*.pptx")])
+            extra_args["position"] = self.wm_pos_var.get()
         elif mode == "PPT":
-            if len(valid_files) == 1:
-                output_path = filedialog.asksaveasfilename(title="儲存 PPT", initialfile=first_file_name, defaultextension=".pptx")
+            if len(valid_files) == 1: output_path = filedialog.asksaveasfilename(title="儲存 PPT", initialfile=first_file_name, defaultextension=".pptx")
             else:
                 output_path = filedialog.askdirectory(title="選擇批次轉檔的儲存資料夾")
                 valid_files = ["BATCH_MODE"] + list(valid_files)
 
         if output_path:
             dpi_map = {"原畫質 (300 DPI)": 300, "高畫質 (200 DPI)": 200, "中畫質 (150 DPI)": 150, "低畫質 (72 DPI)": 72}
-            dpi_val = dpi_map.get(self.quality_var.get(), 300)
-            self.start_thread(mode, valid_files, output_path, dpi_val)
+            extra_args["dpi"] = dpi_map.get(self.quality_var.get(), 300)
+            self.start_thread(mode, valid_files, output_path, extra_args)
 
-    def trigger_merge_process(self, sorted_files, first_file_name):
-        out = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_merged.pdf", defaultextension=".pdf")
-        if out: self.start_thread("MERGE", sorted_files, out, 300)
+    def trigger_list_process(self, mode, sorted_files, first_file_name):
+        ext = ".pdf"
+        suffix = "merged" if mode == "MERGE" else "from_images"
+        out = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_{suffix}.pdf", defaultextension=ext)
+        if out: self.start_thread(mode, sorted_files, out, {})
 
-    def start_thread(self, mode, input_data, output_data, dpi):
+    def start_thread(self, mode, input_data, output_data, extra_args):
         self.set_ui_state("disabled")
         self.stop_event.clear(); self.progress_bar.set(0)
-        threading.Thread(target=self.run_task_router, args=(mode, input_data, output_data, dpi), daemon=True).start()
+        threading.Thread(target=self.run_task_router, args=(mode, input_data, output_data, extra_args), daemon=True).start()
 
     def set_ui_state(self, state):
         self.drop_frame.configure(border_color="#3a7ebf" if state != "disabled" else "#cccccc")
@@ -193,16 +253,21 @@ class PDFToolApp:
         self.root.after(0, lambda: self.status_label.configure(text=text))
         if progress is not None: self.root.after(0, lambda: self.progress_bar.set(progress))
 
-    def run_task_router(self, mode, input_data, output_data, dpi):
+    def run_task_router(self, mode, input_data, output_data, extra):
         try:
             kwargs = {'status_callback': self.update_status, 'stop_event': self.stop_event}
+            result_msg = None
             
             if mode == "MERGE": process_merge_pdfs(input_data, output_data, **kwargs)
-            elif mode == "SPLIT": process_split_pdf(input_data[0], output_data, **kwargs)
-            elif mode == "PROTECT": process_protect_pdf(input_data[0], output_data, input_data[1], **kwargs)
-            elif mode == "PDF2IMG": process_pdf_to_images(input_data[0], output_data, dpi=dpi, **kwargs)
-            elif mode == "COMPRESS": process_compress_pdf(input_data[0], output_data, **kwargs)
-            elif mode == "RMWATERMARK": process_remove_watermark(input_data[0], output_data, dpi=dpi, **kwargs)
+            elif mode == "IMG2PDF": process_images_to_pdf(input_data, output_data, **kwargs)
+            elif mode == "SPLIT": process_split_pdf(input_data[0], output_data, extra["ranges"], **kwargs)
+            elif mode == "PROTECT": process_protect_pdf(input_data[0], output_data, extra["pwd"], **kwargs)
+            elif mode == "UNLOCK": process_unlock_pdf(input_data[0], output_data, extra["pwd"], **kwargs)
+            elif mode == "ROTATE": process_rotate_pdf(input_data[0], output_data, extra["angle"], **kwargs)
+            elif mode == "ADD_WM": process_add_watermark(input_data[0], output_data, extra["text"], **kwargs)
+            elif mode == "PDF2IMG": process_pdf_to_images(input_data[0], output_data, dpi=extra["dpi"], **kwargs)
+            elif mode == "COMPRESS": result_msg = process_compress_pdf(input_data[0], output_data, **kwargs)
+            elif mode == "RMWATERMARK": process_remove_watermark(input_data[0], output_data, dpi=extra["dpi"], position=extra["position"], **kwargs)
             elif mode == "PPT":
                 if input_data[0] == "BATCH_MODE":
                     files = input_data[1:]
@@ -210,14 +275,16 @@ class PDFToolApp:
                         if self.stop_event.is_set(): break
                         base = os.path.splitext(os.path.basename(file))[0]
                         self.update_status(f"🔄 批次處理中 ({idx+1}/{len(files)}): {base}", idx/len(files))
-                        process_pdf_to_ppt(file, os.path.join(output_data, base + ".pptx"), dpi=dpi, **kwargs)
+                        process_pdf_to_ppt(file, os.path.join(output_data, base + ".pptx"), dpi=extra["dpi"], **kwargs)
                 else:
-                    process_pdf_to_ppt(input_data[0], output_data, dpi=dpi, **kwargs)
+                    process_pdf_to_ppt(input_data[0], output_data, dpi=extra["dpi"], **kwargs)
 
             if self.stop_event.is_set(): self.update_status("⛔ 任務已取消", 0)
             else:
                 self.update_status("✅ 任務完成！", 1)
-                messagebox.showinfo("完成", "作業成功！檔案已處理完成。")
+                msg = result_msg if result_msg else "作業成功！檔案已處理完成。"
+                messagebox.showinfo("完成", msg)
+                open_file_or_folder(output_data) # 完成後自動打開資料夾
         except Exception as e:
             self.update_status("❌ 發生錯誤", 0); messagebox.showerror("錯誤", f"執行錯誤：\n{e}")
         finally: self.root.after(0, lambda: self.set_ui_state("normal"))
