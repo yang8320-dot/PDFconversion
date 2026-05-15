@@ -62,6 +62,9 @@ jobs:
         # 加入 hidden-import 確保 pythoncom 相關元件打包正確
         $HIDDEN = "--hidden-import win32timezone --hidden-import win32com"
         
+        # 針對 OCR 模型與執行環境強制打包收集
+        $OCR_INCLUDES = "--collect-data rapidocr_onnxruntime --collect-all onnxruntime"
+        
         if ($MODE -eq 'Full (完整打包 - 含 Poppler 引擎與所有函式庫)') {
             pyinstaller --noconfirm --onedir --noconsole `
               --contents-directory "Library" `
@@ -71,6 +74,7 @@ jobs:
               --collect-all tkinterdnd2 `
               --collect-all customtkinter `
               --collect-all docx2pdf `
+              $OCR_INCLUDES.Split(" ") `
               $HIDDEN.Split(" ") `
               $EXCLUDES.Split(" ") `
               --upx-exclude "*.dll" `
@@ -85,6 +89,7 @@ jobs:
               --collect-all tkinterdnd2 `
               --collect-all customtkinter `
               --collect-all docx2pdf `
+              $OCR_INCLUDES.Split(" ") `
               $HIDDEN.Split(" ") `
               $EXCLUDES.Split(" ") `
               --upx-exclude "*.dll" `
