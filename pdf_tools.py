@@ -41,27 +41,24 @@ def process_split_pdf(input_file, output_dir, status_callback, stop_event):
         with open(os.path.join(output_dir, f"{base_name}_page_{i+1}.pdf"), "wb") as f:
             writer.write(f)
 
-def process_pdf_to_images(input_file, output_dir, status_callback, stop_event):
+def process_pdf_to_images(input_file, output_dir, status_callback, stop_event, dpi=300):
     poppler = get_poppler_path()
     info = pdfinfo_from_path(input_file, poppler_path=poppler)
     total = info["Pages"]
     base_name = os.path.splitext(os.path.basename(input_file))[0]
     
-    # 【記憶體優化】每次迴圈只從 PDF 抽取 1 頁進記憶體，儲存後立刻回收
     for i in range(1, total + 1):
         if stop_event.is_set(): break
         status_callback(f"🖼️ 正在處理並儲存圖片 {i} / {total}...", i/total)
-        page_img = convert_from_path(input_file, dpi=300, first_page=i, last_page=i, poppler_path=poppler)[0]
+        page_img = convert_from_path(input_file, dpi=dpi, first_page=i, last_page=i, poppler_path=poppler)[0]
         page_img.save(os.path.join(output_dir, f"{base_name}_{i}.jpg"), 'JPEG')
-        del page_img
-        gc.collect()
+        del page_img; gc.collect()
 
-def process_remove_watermark(input_file, output_path, status_callback, stop_event):
+def process_remove_watermark(input_file, output_path, status_callback, stop_event, dpi=300):
     poppler = get_poppler_path()
     info = pdfinfo_from_path(input_file, poppler_path=poppler)
     total = info["Pages"]
     
-    # 使用暫存資料夾存放圖片，避免記憶體爆炸
     temp_dir = tempfile.mkdtemp()
     temp_images = []
     
@@ -69,15 +66,13 @@ def process_remove_watermark(input_file, output_path, status_callback, stop_even
         for i in range(1, total + 1):
             if stop_event.is_set(): break
             status_callback(f"🖌️ 正在抹除浮水印 {i} / {total}...", 0.1 + 0.7*(i/total))
-            page_img = convert_from_path(input_file, dpi=300, first_page=i, last_page=i, poppler_path=poppler)[0]
+            page_img = convert_from_path(input_file, dpi=dpi, first_page=i, last_page=i, poppler_path=poppler)[0]
             page_img = apply_watermark_removal(page_img)
             
             temp_path = os.path.join(temp_dir, f"page_{i}.jpg")
             page_img.save(temp_path, "JPEG", quality=95)
             temp_images.append(temp_path)
-            
-            del page_img
-            gc.collect()
+            del page_img; gc.collect()
             
         if stop_event.is_set(): return
         status_callback("💾 正在組合寫入檔案...", 0.9)
@@ -85,29 +80,25 @@ def process_remove_watermark(input_file, output_path, status_callback, stop_even
         if output_path.lower().endswith('.pptx'):
             prs = Presentation()
             from PIL import Image
-            with Image.open(temp_images[0]) as first_img:
-                width_px, height_px = first_img.size
-            prs.slide_width = int(width_px * 914400 / 300) 
-            prs.slide_height = int(height_px * 914400 / 300)
+            with Image.open(temp_images[0]) as first_img: width_px, height_px = first_img.size
+            prs.slide_width = int(width_px * 914400 / dpi) 
+            prs.slide_height = int(height_px * 914400 / dpi)
             
             for img_path in temp_images:
                 slide = prs.slides.add_slide(prs.slide_layouts[6])
                 slide.shapes.add_picture(img_path, 0, 0, prs.slide_width, prs.slide_height)
             prs.save(output_path)
         else:
-            # 建立高效的 PDF 寫入
             doc = fitz.open()
             for img_path in temp_images:
                 img_doc = fitz.open(img_path)
                 pdf_bytes = img_doc.convert_to_pdf()
                 img_pdf = fitz.open("pdf", pdf_bytes)
                 doc.insert_pdf(img_pdf)
-                img_doc.close()
-                img_pdf.close()
+                img_doc.close(); img_pdf.close()
             doc.save(output_path)
             doc.close()
-    finally:
-        shutil.rmtree(temp_dir, ignore_errors=True)
+    finally: shutil.rmtree(temp_dir, ignore_errors=True)
 
 def process_compress_pdf(input_file, output_path, status_callback, stop_event):
     status_callback("🗜️ 正在掃描與壓縮 PDF 檔案...", 0.5)
