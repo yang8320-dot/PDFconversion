@@ -88,8 +88,8 @@ class PDFToolApp:
     def __init__(self, root):
         self.root = root
         self.root.title("PDF工具")
-        # 縮小視窗高度
-        self.root.geometry("820x380")
+        # 【優化】大幅縮小視窗高度，砍掉多餘空白
+        self.root.geometry("820x290")
         ctk.set_appearance_mode("light")  
         ctk.set_default_color_theme("blue")  
 
@@ -98,17 +98,21 @@ class PDFToolApp:
 
         # 功能選擇區塊
         mode_frame = ctk.CTkFrame(self.root, fg_color="transparent")
-        mode_frame.pack(fill="x", padx=15, pady=(15, 5))
+        mode_frame.pack(fill="x", padx=15, pady=(10, 5))
+        
+        # 【優化】設定 Grid 欄位平均分配，確保按鈕上下完美對齊
+        for i in range(4):
+            mode_frame.grid_columnconfigure(i, weight=1, uniform="col_group")
         
         modes1 = [("PDF 轉 PPT (OCR)", "PPT"), ("PDF 轉 Word (OCR)", "WORD"), ("NotebookLM 去浮水印", "RMWATERMARK"), ("合併 PDF", "MERGE")]
         modes2 = [("分割 PDF", "SPLIT"), ("加密 PDF", "PROTECT"), ("PDF 轉圖片", "PDF2IMG"), ("PDF 壓縮", "COMPRESS")]
         
         for i, (text, val) in enumerate(modes1):
-            ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 13)).grid(row=0, column=i, padx=8, pady=5)
+            ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 13)).grid(row=0, column=i, padx=5, pady=8, sticky="w")
         for i, (text, val) in enumerate(modes2):
-            ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 13)).grid(row=1, column=i, padx=8, pady=5)
+            ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 13)).grid(row=1, column=i, padx=5, pady=8, sticky="w")
 
-        # 進階設定區塊 (預設改為 False)
+        # 進階設定區塊
         opt_frame = ctk.CTkFrame(self.root, fg_color="#eef5fa", corner_radius=10)
         opt_frame.pack(fill="x", padx=15, pady=5)
         
@@ -119,8 +123,8 @@ class PDFToolApp:
         ctk.CTkCheckBox(opt_frame, text="啟用 GPU 加速 (需 NVIDIA 顯卡)", variable=self.use_gpu_var, font=("Microsoft JhengHei", 12)).pack(side="left", padx=10)
         ctk.CTkCheckBox(opt_frame, text="PPT 自動白底覆蓋 (適合白底文件)", variable=self.white_bg_var, font=("Microsoft JhengHei", 12)).pack(side="left", padx=10)
 
-        # 拖曳放置區塊 (高度縮減 70%，改用固定高度，不使用 expand=True)
-        self.drop_frame = ctk.CTkFrame(self.root, fg_color="#f9f9f9", border_width=2, border_color="#3a7ebf", corner_radius=15, height=80)
+        # 拖曳放置區塊
+        self.drop_frame = ctk.CTkFrame(self.root, fg_color="#f9f9f9", border_width=2, border_color="#3a7ebf", corner_radius=15, height=70)
         self.drop_frame.pack(fill="x", padx=15, pady=10)
         self.drop_frame.pack_propagate(False) # 鎖定高度
         
@@ -179,7 +183,7 @@ class PDFToolApp:
         elif mode == "COMPRESS":
             output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_compressed.pdf", defaultextension=".pdf")
         elif mode == "RMWATERMARK":
-            output_path = filedialog.asksaveasfilename(title="儲存去浮水印檔案 (可選 PDF 或 PPT)", initialfile=f"{first_file_name}_clean", defaultextension=".pdf", filetypes=[("PDF 檔案", "*.pdf"), ("PowerPoint 檔案", "*.pptx")])
+            output_path = filedialog.asksaveasfilename(title="儲存去浮水印檔案", initialfile=f"{first_file_name}_clean", defaultextension=".pdf", filetypes=[("PDF 檔案", "*.pdf"), ("PowerPoint 檔案", "*.pptx")])
         elif mode in ["PPT", "WORD"]:
             if len(valid_files) == 1:
                 ext = ".pptx" if mode == "PPT" else ".docx"
