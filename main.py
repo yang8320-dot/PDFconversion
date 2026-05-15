@@ -14,7 +14,6 @@ from pdf_tools import (process_merge_pdfs, process_protect_pdf, process_split_pd
                        process_add_page_numbers, process_reorder_pages, process_extract_original_images,
                        process_flatten_pdf, process_add_image_watermark)
 
-# 增加匯入 get_base_path 來定位 icon.ico 的正確路徑
 from utils import check_poppler_exists, open_file_or_folder, get_base_path
 
 def check_single_instance():
@@ -31,7 +30,6 @@ def set_dpi_awareness():
     except: pass
 
 def check_is_encrypted(file_path):
-    """防呆檢查：確認 PDF 是否被加密"""
     try:
         from pypdf import PdfReader
         return PdfReader(file_path).is_encrypted
@@ -66,7 +64,12 @@ class ListManagerWindow(ctk.CTkToplevel):
         btn_frame = ctk.CTkFrame(self)
         btn_frame.pack(side="right", fill="y", padx=(5, 15), pady=15)
         
-        file_types = [("PDF", "*.pdf")] if mode == "MERGE" else [("Images", "*.jpg;*.png")]
+        # 根據模式決定可以選擇的副檔名
+        if mode == "MERGE":
+            file_types = [("支援的檔案 (PDF/圖/Word)", "*.pdf;*.jpg;*.jpeg;*.png;*.docx;*.doc")]
+        else:
+            file_types = [("Images", "*.jpg;*.jpeg;*.png")]
+            
         ctk.CTkButton(btn_frame, text="➕ 新增檔案", command=lambda: [self.listbox.insert(tk.END, f) for f in filedialog.askopenfilenames(filetypes=file_types)]).pack(pady=5)
         ctk.CTkButton(btn_frame, text="⬆️ 上移", command=self.move_up).pack(pady=5)
         ctk.CTkButton(btn_frame, text="⬇️ 下移", command=self.move_down).pack(pady=5)
@@ -102,11 +105,9 @@ class PDFToolApp:
         ctk.set_appearance_mode("light")  
         ctk.set_default_color_theme("blue")  
 
-        # ------------------ 設定視窗與工具列圖示 ------------------
         icon_path = os.path.join(get_base_path(), "icon.ico")
         if os.path.exists(icon_path):
             self.root.iconbitmap(icon_path)
-        # --------------------------------------------------------
 
         if not check_poppler_exists():
             messagebox.showwarning("元件缺失", "找不到 Poppler 渲染元件，圖片轉檔相關功能可能受限。")
@@ -114,13 +115,13 @@ class PDFToolApp:
         self.mode_var = ctk.StringVar(value="PPT")
         self.stop_event = threading.Event() 
 
-        # 功能選擇區塊
         mode_frame = ctk.CTkFrame(self.root, fg_color="transparent")
         mode_frame.pack(fill="x", padx=15, pady=(10, 5))
         for i in range(5): mode_frame.grid_columnconfigure(i, weight=1, uniform="col_group")
         
+        # 更改了合併按鈕的名稱，提示支援Word
         modes1 = [("PDF 轉 PPT", "PPT"), ("PDF 轉圖片", "PDF2IMG"), ("圖片轉 PDF", "IMG2PDF"), ("提取純文字", "EXTRACT_TXT"), ("提取內嵌圖", "EXTRACT_IMGS")]
-        modes2 = [("提取/分割 PDF", "SPLIT"), ("刪除指定頁", "REMOVE_PAGES"), ("插入空白頁", "INSERT_BLANK"), ("重新排序頁", "REORDER"), ("合併 PDF", "MERGE")]
+        modes2 = [("提取/分割 PDF", "SPLIT"), ("刪除指定頁", "REMOVE_PAGES"), ("插入空白頁", "INSERT_BLANK"), ("重新排序頁", "REORDER"), ("萬能合併(含Word)", "MERGE")]
         modes3 = [("轉黑白/灰階", "GRAYSCALE"), ("扁平化(防篡改)", "FLATTEN"), ("PDF 壓縮", "COMPRESS"), ("PDF 旋轉", "ROTATE"), ("添加頁碼", "ADD_PAGE_NUM")]
         modes4 = [("加密 PDF", "PROTECT"), ("解鎖 PDF", "UNLOCK"), ("加文字浮水印", "ADD_WM"), ("加圖片浮水印", "IMG_WM"), ("去浮水印", "RMWATERMARK")]
         
@@ -129,7 +130,6 @@ class PDFToolApp:
         for i, (text, val) in enumerate(modes3): ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 12)).grid(row=2, column=i, padx=2, pady=6, sticky="w")
         for i, (text, val) in enumerate(modes4): ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 12)).grid(row=3, column=i, padx=2, pady=6, sticky="w")
 
-        # 進階設定區塊
         self.opt_frame = ctk.CTkFrame(self.root, fg_color="#eef5fa", corner_radius=10)
         self.opt_frame.pack(fill="x", padx=15, pady=5)
         
@@ -149,7 +149,6 @@ class PDFToolApp:
         self.mode_var.trace_add("write", self.update_options_ui)
         self.update_options_ui() 
 
-        # 拖曳區塊
         self.drop_frame = ctk.CTkFrame(self.root, fg_color="#f9f9f9", border_width=2, border_color="#3a7ebf", corner_radius=15, height=70)
         self.drop_frame.pack(fill="x", padx=15, pady=10)
         self.drop_frame.pack_propagate(False)
@@ -158,7 +157,6 @@ class PDFToolApp:
         self.drop_frame.bind("<Button-1>", lambda e: self.browse_file()); self.status_label.bind("<Button-1>", lambda e: self.browse_file())
         self.root.drop_target_register(DND_FILES); self.root.dnd_bind('<<Drop>>', self.on_drop)
 
-        # 底部區塊
         bottom_frame = ctk.CTkFrame(self.root, fg_color="transparent")
         bottom_frame.pack(fill="x", padx=15, pady=(0, 10))
         self.progress_bar = ctk.CTkProgressBar(bottom_frame)
@@ -186,22 +184,34 @@ class PDFToolApp:
 
     def browse_file(self):
         mode = self.mode_var.get()
-        if mode in ["PPT", "PDF2IMG", "RMWATERMARK", "IMG2PDF"]:
+        if mode in ["PPT", "PDF2IMG", "RMWATERMARK"]:
             file_paths = filedialog.askopenfilenames(title="選擇檔案", filetypes=[("PDF/Images", "*.pdf;*.jpg;*.png")])
-        else: file_paths = filedialog.askopenfilenames(title="選擇檔案", filetypes=[("PDF Files", "*.pdf")])
+        elif mode == "IMG2PDF":
+            file_paths = filedialog.askopenfilenames(title="選擇檔案", filetypes=[("Images", "*.jpg;*.jpeg;*.png")])
+        elif mode == "MERGE":
+            # 讓萬能合併模式可以選到 Word 跟 圖片
+            file_paths = filedialog.askopenfilenames(title="選擇檔案", filetypes=[("支援的檔案 (PDF/圖/Word)", "*.pdf;*.jpg;*.jpeg;*.png;*.docx;*.doc")])
+        else: 
+            file_paths = filedialog.askopenfilenames(title="選擇檔案", filetypes=[("PDF Files", "*.pdf")])
+            
         if file_paths: self.process_selected_files(file_paths)
 
     def process_selected_files(self, file_paths):
         mode = self.mode_var.get()
-        valid_files = [f for f in file_paths if f.lower().endswith(('.pdf', '.jpg', '.png'))]
-        if not valid_files: return messagebox.showerror("錯誤", "請提供有效的檔案！")
+        
+        # 根據模式放寬副檔名限制
+        valid_exts = ('.pdf', '.jpg', '.jpeg', '.png')
+        if mode == "MERGE": valid_exts = ('.pdf', '.jpg', '.jpeg', '.png', '.docx', '.doc')
+            
+        valid_files = [f for f in file_paths if f.lower().endswith(valid_exts)]
+        if not valid_files: return messagebox.showerror("錯誤", "請提供支援的檔案格式！")
 
         first_file = valid_files[0]
         first_file_name = os.path.splitext(os.path.basename(first_file))[0]
 
         if mode != "UNLOCK" and first_file.lower().endswith(".pdf"):
             if check_is_encrypted(first_file):
-                return messagebox.showwarning("檔案已加密", "⚠️ 此 PDF 受到密碼保護！\n\n請先選擇「解鎖 PDF」功能，輸入密碼將其解密為一般檔案後，再進行其他操作。")
+                return messagebox.showwarning("檔案已加密", "⚠️ 此 PDF 受到密碼保護！\n\n請先選擇「解鎖 PDF」功能，輸入密碼將其解密為一般檔案後，再進行操作。")
 
         if mode in ["MERGE", "IMG2PDF"]: 
             return ListManagerWindow(self.root, valid_files, mode, lambda sf: self.trigger_list_process(mode, sf, first_file_name))
