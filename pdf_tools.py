@@ -8,7 +8,9 @@ from utils import get_poppler_path, apply_watermark_removal, format_size
 def process_merge_pdfs(input_files, output_path, status_callback, stop_event):
     from pypdf import PdfWriter
     import fitz
-    import pythoncom  # 用於多執行緒調用 Word COM 元件
+    import pythoncom
+    import sys
+    import io
     
     # 必須初始化 COM，否則在 Thread 裡面背景呼叫 MS Word 會崩潰
     pythoncom.CoInitialize()
@@ -29,7 +31,6 @@ def process_merge_pdfs(input_files, output_path, status_callback, stop_event):
                     merger.append(file_path)
                     
                 elif ext in ['jpg', 'jpeg', 'png', 'bmp']:
-                    # 圖片轉 PDF 並寫入暫存
                     img_doc = fitz.open(file_path)
                     pdf_bytes = img_doc.convert_to_pdf()
                     img_pdf = fitz.open("pdf", pdf_bytes)
@@ -41,12 +42,20 @@ def process_merge_pdfs(input_files, output_path, status_callback, stop_event):
                 elif ext in ['docx', 'doc']:
                     from docx2pdf import convert
                     temp_pdf = os.path.join(temp_dir, f"temp_{i}.pdf")
+                    
+                    # 攔截 docx2pdf 產生的終端機進度條輸出，防止 --noconsole 打包模式崩潰
+                    dummy_out = io.StringIO()
+                    old_out, old_err = sys.stdout, sys.stderr
+                    sys.stdout, sys.stderr = dummy_out, dummy_out
+                    
                     try:
-                        # 呼叫本機 MS Word 進行完美格式轉換
                         convert(file_path, temp_pdf)
                         merger.append(temp_pdf)
                     except Exception as e:
                         raise Exception(f"Word 轉換失敗 ({base_name})\n1. 請確認電腦有安裝 Microsoft Word。\n2. 請確認沒有開啟對話框卡住 Word。\n錯誤細節: {e}")
+                    finally:
+                        # 轉換完畢後恢復標準輸出
+                        sys.stdout, sys.stderr = old_out, old_err
                 else:
                     raise Exception(f"不支援的檔案格式: {ext}")
             
