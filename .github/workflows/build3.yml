@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version_name:
-        description: '版本名稱 (例如: v2.0.2)'
+        description: '版本名稱 (例如: v2.0.3)'
         required: true
-        default: 'v2.0.2'
+        default: 'v2.0.3'
 
 permissions:
   contents: write
@@ -30,6 +30,10 @@ jobs:
         pip install pyinstaller
         pip install -r requirements.txt
 
+    # 🚀 新增：安裝 UPX 壓縮工具
+    - name: Install UPX for Executable Compression
+      run: choco install upx
+
     - name: Download and Prep Poppler & EasyOCR Models
       shell: pwsh
       env:
@@ -41,7 +45,7 @@ jobs:
         New-Item -ItemType Directory -Path "Library/poppler_bin" -Force
         Copy-Item -Path "poppler_temp/poppler-24.02.0/Library/bin/*" -Destination "Library/poppler_bin" -Recurse
 
-        # 雲端自動下載 EasyOCR 模型 (確保一定打包進去)
+        # 雲端自動下載 EasyOCR 模型
         @"
         import easyocr
         import shutil
@@ -56,12 +60,18 @@ jobs:
 
     - name: Build Executable (Portable Structure)
       run: |
+        # 🚀 新增：排除不必要的繪圖模組，並啟用 UPX 強制壓縮主程式 (避開 DLL 避免損壞)
         pyinstaller --noconfirm --onedir --noconsole `
           --contents-directory "Library" `
           --add-data "Library/poppler_bin;Library/poppler_bin" `
           --add-data "Library/model;Library/model" `
           --collect-all tkinterdnd2 `
           --collect-all customtkinter `
+          --exclude-module matplotlib `
+          --exclude-module IPython `
+          --exclude-module pytest `
+          --upx-exclude "*.dll" `
+          --upx-exclude "*.pyd" `
           --name "PDFconversion" `
           main.py
 
