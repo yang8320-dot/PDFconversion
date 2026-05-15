@@ -1,0 +1,137 @@
+name: Build PDFconversion Portable
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_name:
+        description: '版本名稱 (例如: v2.1.0)'
+        required: true
+        default: 'v2.1.0'
+      build_mode:
+        description: '選擇打包模式'
+        required: true
+        type: choice
+        options:
+          - Full (完整打包 - 含模型與所有函式庫)
+          - Lite (輕量更新 - 僅主程式 exe)
+        default: 'Full (完整打包 - 含模型與所有函式庫)'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install Build Dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pyinstaller
+        pip install -r requirements.txt
+
+    - name: Install UPX for Executable Compression
+      run: choco install upx
+
+    # ==========================================
+    # 只有選擇「Full (完整打包)」時，才執行下載模型與 Poppler
+    # ==========================================
+    - name: Download and Prep Poppler & EasyOCR Models
+      if: github.event.inputs.build_mode == 'Full (完整打包 - 含模型與所有函式庫)'
+      shell: pwsh
+      env:
+        PYTHONIOENCODING: "utf8"
+      run: |
+        # 下載 Poppler
+        Invoke-WebRequest -Uri "https://github.com/oschwartz10612/poppler-windows/releases/download/v24.02.0-0/Release-24.02.0-0.zip" -OutFile "poppler.zip"
+        Expand-Archive -Path "poppler.zip" -DestinationPath "poppler_temp"
+        New-Item -ItemType Directory -Path "Library/poppler_bin" -Force
+        Copy-Item -Path "poppler_temp/poppler-24.02.0/Library/bin/*" -Destination "Library/poppler_bin" -Recurse
+
+        # 下載 EasyOCR 模型
+        @"
+        import easyocr
+        import shutil
+        import os
+        easyocr.Reader(['ch_tra', 'en'])
+        src = os.path.join(os.path.expanduser('~'), '.EasyOCR', 'model')
+        dst = 'Library/model'
+        shutil.copytree(src, dst, dirs_exist_ok=True)
+        "@ > download_models.py
+        
+        python download_models.py
+
+    # ==========================================
+    # 根據選擇的模式執行 PyInstaller
+    # ==========================================
+    - name: Build Executable (Portable Structure)
+      shell: pwsh
+      run: |
+        $MODE = "${{ github.event.inputs.build_mode }}"
+        
+        if ($MODE -eq 'Full (完整打包 - 含模型與所有函式庫)') {
+            pyinstaller --noconfirm --onedir --noconsole `
+              --contents-directory "Library" `
+              --add-data "Library/poppler_bin;Library/poppler_bin" `
+              --add-data "Library/model;Library/model" `
+              --collect-all tkinterdnd2 `
+              --collect-all customtkinter `
+              --exclude-module matplotlib `
+              --exclude-module IPython `
+              --exclude-module pytest `
+              --upx-exclude "*.dll" `
+              --upx-exclude "*.pyd" `
+              --name "PDFconversion" `
+              main.py
+        } else {
+            # 輕量更新模式：不包含龐大的依賴資料夾
+            pyinstaller --noconfirm --onedir --noconsole `
+              --contents-directory "Library" `
+              --collect-all tkinterdnd2 `
+              --collect-all customtkinter `
+              --exclude-module matplotlib `
+              --exclude-module IPython `
+              --exclude-module pytest `
+              --upx-exclude "*.dll" `
+              --upx-exclude "*.pyd" `
+              --name "PDFconversion" `
+              main.py
+        }
+
+    # ==========================================
+    # 根據模式決定壓縮什麼檔案
+    # ==========================================
+    - name: Package to Zip
+      shell: pwsh
+      run: |
+        $VERSION = "${{ github.event.inputs.version_name }}"
+        $MODE = "${{ github.event.inputs.build_mode }}"
+        
+        if ($MODE -eq 'Full (完整打包 - 含模型與所有函式庫)') {
+            Compress-Archive -Path dist/PDFconversion/* -DestinationPath "PDFconversion_Full_$VERSION.zip"
+        } else {
+            # 輕量模式：只壓縮瘦身後的主程式 (通常小於 10MB)
+            Compress-Archive -Path dist/PDFconversion/PDFconversion.exe -DestinationPath "PDFconversion_Lite_$VERSION.zip"
+        }
+
+    - name: Upload Build Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: PDFconversion_Build_${{ github.event.inputs.version_name }}
+        path: "*.zip"
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: ${{ github.event.inputs.version_name }}
+        files: "*.zip"
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
