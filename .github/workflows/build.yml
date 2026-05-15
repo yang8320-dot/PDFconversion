@@ -59,11 +59,11 @@ jobs:
         
         $EXCLUDES = "--exclude-module matplotlib --exclude-module IPython --exclude-module pytest --exclude-module torch --exclude-module torchvision --exclude-module easyocr"
         
-        # 【修正 1】強制引入本地的 pdf_tools 與 utils，避免找不到模組
-        $HIDDEN = "--hidden-import win32timezone --hidden-import win32com --hidden-import pdf_tools --hidden-import utils"
+        # 強制聲明所有隱藏依賴，防止 PyInstaller 漏抓
+        $HIDDEN = "--hidden-import win32timezone --hidden-import win32com --hidden-import fitz --hidden-import pymupdf --hidden-import pptx --hidden-import opencc --hidden-import rapidocr_onnxruntime"
         
-        # 【修正 2】加入 --collect-all opencc 確保簡繁轉換字典檔被打包
-        $OCR_INCLUDES = "--collect-data rapidocr_onnxruntime --collect-all onnxruntime --collect-all opencc"
+        # 強制收集所有龐大資源檔 (OCR 模型、視覺庫、簡繁字典)
+        $COLLECT = "--collect-data rapidocr_onnxruntime --collect-all onnxruntime --collect-all opencc --collect-all cv2 --collect-all fitz"
         
         if ($MODE -eq 'Full (完整打包 - 含 Poppler 引擎與所有函式庫)') {
             pyinstaller --noconfirm --onedir --noconsole `
@@ -74,7 +74,7 @@ jobs:
               --collect-all tkinterdnd2 `
               --collect-all customtkinter `
               --collect-all docx2pdf `
-              $OCR_INCLUDES.Split(" ") `
+              $COLLECT.Split(" ") `
               $HIDDEN.Split(" ") `
               $EXCLUDES.Split(" ") `
               --upx-exclude "*.dll" `
@@ -89,7 +89,7 @@ jobs:
               --collect-all tkinterdnd2 `
               --collect-all customtkinter `
               --collect-all docx2pdf `
-              $OCR_INCLUDES.Split(" ") `
+              $COLLECT.Split(" ") `
               $HIDDEN.Split(" ") `
               $EXCLUDES.Split(" ") `
               --upx-exclude "*.dll" `
