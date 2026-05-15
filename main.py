@@ -7,7 +7,7 @@ from tkinter import filedialog, messagebox
 from tkinterdnd2 import DND_FILES, TkinterDnD
 import customtkinter as ctk
 
-from pdf_tools import process_merge_pdfs, process_protect_pdf, process_split_pdf, process_pdf_to_images, process_compress_pdf
+from pdf_tools import process_merge_pdfs, process_protect_pdf, process_split_pdf, process_pdf_to_images, process_compress_pdf, process_rebuild_pdf
 from ocr_to_ppt import process_ocr_to_ppt
 from ocr_to_word import process_ocr_to_word
 
@@ -22,46 +22,34 @@ def check_single_instance():
 
 def set_dpi_awareness():
     try: ctypes.windll.shcore.SetProcessDpiAwareness(2)
-    except:
-        try: ctypes.windll.user32.SetProcessDPIAware()
-        except: pass
+    except: pass
 
 class CTkinterDnD(ctk.CTk, TkinterDnD.DnDWrapper):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.TkdndVersion = TkinterDnD._require(self)
 
-# ==========================================
-# 新增：PDF 合併排序專用管理視窗
-# ==========================================
 class MergeManagerWindow(ctk.CTkToplevel):
     def __init__(self, parent, initial_files, start_callback):
         super().__init__(parent)
         self.title("PDF 合併管理器 - 調整順序")
         self.geometry("650x400")
         self.start_callback = start_callback
-        
-        # 設定為強制回應視窗 (Modal)
         self.transient(parent)
         self.grab_set()
 
-        # 左側：檔案列表區塊 (使用標準 tk.Listbox 以便於選取與排序)
         list_frame = ctk.CTkFrame(self, fg_color="transparent")
         list_frame.pack(side="left", fill="both", expand=True, padx=(20, 10), pady=20)
-        
         ctk.CTkLabel(list_frame, text="合併檔案列表 (由上到下)：", font=("Microsoft JhengHei", 14, "bold")).pack(anchor="w", pady=(0, 5))
         
         scrollbar = tk.Scrollbar(list_frame)
         scrollbar.pack(side="right", fill="y")
-        
         self.listbox = tk.Listbox(list_frame, selectmode=tk.SINGLE, font=("Microsoft JhengHei", 11), yscrollcommand=scrollbar.set, activestyle="none")
         self.listbox.pack(side="left", fill="both", expand=True)
         scrollbar.config(command=self.listbox.yview)
         
-        for f in initial_files:
-            self.listbox.insert(tk.END, f)
+        for f in initial_files: self.listbox.insert(tk.END, f)
             
-        # 右側：操作按鈕區塊
         btn_frame = ctk.CTkFrame(self)
         btn_frame.pack(side="right", fill="y", padx=(10, 20), pady=20)
         
@@ -69,13 +57,11 @@ class MergeManagerWindow(ctk.CTkToplevel):
         ctk.CTkButton(btn_frame, text="⬆️ 上移", command=self.move_up).pack(pady=5)
         ctk.CTkButton(btn_frame, text="⬇️ 下移", command=self.move_down).pack(pady=5)
         ctk.CTkButton(btn_frame, text="❌ 移除", command=self.remove_item, fg_color="#cc3333", hover_color="#aa2222").pack(pady=5)
-        
         ctk.CTkButton(btn_frame, text="🚀 開始合併", command=self.start_merge, fg_color="#28a745", hover_color="#218838", height=40, font=("Microsoft JhengHei", 14, "bold")).pack(side="bottom", pady=(20, 10))
 
     def add_files(self):
-        new_files = filedialog.askopenfilenames(title="選擇要新增的 PDF", filetypes=[("PDF Files", "*.pdf")])
-        for f in new_files:
-            self.listbox.insert(tk.END, f)
+        new_files = filedialog.askopenfilenames(title="選擇新增檔案", filetypes=[("PDF", "*.pdf")])
+        for f in new_files: self.listbox.insert(tk.END, f)
 
     def move_up(self):
         try:
@@ -85,7 +71,7 @@ class MergeManagerWindow(ctk.CTkToplevel):
                 self.listbox.delete(idx)
                 self.listbox.insert(idx - 1, val)
                 self.listbox.select_set(idx - 1)
-        except IndexError: pass
+        except: pass
 
     def move_down(self):
         try:
@@ -95,69 +81,62 @@ class MergeManagerWindow(ctk.CTkToplevel):
                 self.listbox.delete(idx)
                 self.listbox.insert(idx + 1, val)
                 self.listbox.select_set(idx + 1)
-        except IndexError: pass
+        except: pass
 
     def remove_item(self):
         try:
             idx = self.listbox.curselection()[0]
             self.listbox.delete(idx)
-            # 刪除後自動選取下一個
-            if self.listbox.size() > 0:
-                self.listbox.select_set(min(idx, self.listbox.size() - 1))
-        except IndexError: pass
+            if self.listbox.size() > 0: self.listbox.select_set(min(idx, self.listbox.size() - 1))
+        except: pass
 
     def start_merge(self):
         final_list = list(self.listbox.get(0, tk.END))
-        if len(final_list) < 2:
-            messagebox.showwarning("警告", "合併功能需要至少兩個檔案！")
-            return
+        if len(final_list) < 2: return messagebox.showwarning("警告", "需要至少兩個檔案！")
         self.start_callback(final_list)
         self.destroy()
 
-# ==========================================
-# 主應用程式
-# ==========================================
 class PDFToolApp:
     def __init__(self, root):
         self.root = root
         self.root.title("PDFconversion - 專業多功能工具 (Pro)")
-        self.root.geometry("850x650")
+        self.root.geometry("880x680")
         ctk.set_appearance_mode("light")  
         ctk.set_default_color_theme("blue")  
 
         self.mode_var = ctk.StringVar(value="PPT")
         self.stop_event = threading.Event() 
 
-        # 頂部標題
         ctk.CTkLabel(self.root, text="PDFconversion 專業工具集", font=("Microsoft JhengHei", 24, "bold"), text_color="#333").pack(pady=(15, 5))
 
-        # 功能選擇區塊
+        # 功能選擇區塊 (修正文字與新增重建PDF模式)
         mode_frame = ctk.CTkFrame(self.root, fg_color="transparent")
         mode_frame.pack(fill="x", padx=20, pady=5)
         
-        modes1 = [("OCR 轉 PPT", "PPT"), ("OCR 轉 Word", "WORD"), ("合併 PDF", "MERGE"), ("分割 PDF", "SPLIT")]
-        modes2 = [("加密 PDF", "PROTECT"), ("PDF 轉圖片", "PDF2IMG"), ("PDF 壓縮", "COMPRESS")]
+        modes1 = [("PDF 轉 PPT (OCR)", "PPT"), ("PDF 轉 Word (OCR)", "WORD"), ("圖片重建 PDF", "REBUILD"), ("合併 PDF", "MERGE")]
+        modes2 = [("分割 PDF", "SPLIT"), ("加密 PDF", "PROTECT"), ("PDF 轉圖片", "PDF2IMG"), ("PDF 壓縮", "COMPRESS")]
         
         for i, (text, val) in enumerate(modes1):
             ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 13)).grid(row=0, column=i, padx=10, pady=5)
         for i, (text, val) in enumerate(modes2):
             ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 13)).grid(row=1, column=i, padx=10, pady=5)
 
-        # 進階設定區塊
+        # 進階設定區塊 (加入去浮水印)
         opt_frame = ctk.CTkFrame(self.root, fg_color="#eef5fa", corner_radius=10)
         opt_frame.pack(fill="x", padx=30, pady=5)
         
         self.use_gpu_var = ctk.BooleanVar(value=True)
         self.white_bg_var = ctk.BooleanVar(value=True)
+        self.rm_watermark_var = ctk.BooleanVar(value=False)
         
-        ctk.CTkLabel(opt_frame, text="⚙️ 進階設定 (僅限 OCR):", font=("Microsoft JhengHei", 12, "bold")).pack(side="left", padx=15, pady=5)
-        ctk.CTkCheckBox(opt_frame, text="啟用 GPU 加速 (需 NVIDIA 顯卡)", variable=self.use_gpu_var, font=("Microsoft JhengHei", 12)).pack(side="left", padx=10)
-        ctk.CTkCheckBox(opt_frame, text="PPT 自動白底覆蓋(適合白底文件)", variable=self.white_bg_var, font=("Microsoft JhengHei", 12)).pack(side="left", padx=10)
+        ctk.CTkLabel(opt_frame, text="⚙️ 進階設定:", font=("Microsoft JhengHei", 12, "bold")).pack(side="left", padx=15, pady=5)
+        ctk.CTkCheckBox(opt_frame, text="抹除右下角浮水印", variable=self.rm_watermark_var, font=("Microsoft JhengHei", 12), text_color="red").pack(side="left", padx=10)
+        ctk.CTkCheckBox(opt_frame, text="啟用 GPU", variable=self.use_gpu_var, font=("Microsoft JhengHei", 12)).pack(side="left", padx=10)
+        ctk.CTkCheckBox(opt_frame, text="PPT 白底覆蓋", variable=self.white_bg_var, font=("Microsoft JhengHei", 12)).pack(side="left", padx=10)
 
         # 拖曳放置區塊
         self.drop_frame = ctk.CTkFrame(self.root, fg_color="#f9f9f9", border_width=2, border_color="#3a7ebf", corner_radius=15)
         self.drop_frame.pack(expand=True, fill="both", padx=30, pady=10)
-        
         self.status_label = ctk.CTkLabel(self.drop_frame, text="📁 將檔案拖曳至此 或 點擊選擇檔案\n支援批次處理", font=("Microsoft JhengHei", 16, "bold"), text_color="#555")
         self.status_label.pack(expand=True)
         
@@ -166,14 +145,12 @@ class PDFToolApp:
         self.root.drop_target_register(DND_FILES)
         self.root.dnd_bind('<<Drop>>', self.on_drop)
 
-        # 底部進度條與取消按鈕
+        # 底部進度條
         bottom_frame = ctk.CTkFrame(self.root, fg_color="transparent")
         bottom_frame.pack(fill="x", padx=30, pady=(0, 20))
-        
         self.progress_bar = ctk.CTkProgressBar(bottom_frame)
         self.progress_bar.pack(side="left", expand=True, fill="x", padx=(0, 10))
         self.progress_bar.set(0)
-        
         self.cancel_btn = ctk.CTkButton(bottom_frame, text="取消任務", fg_color="#cc3333", hover_color="#aa2222", state="disabled", command=self.cancel_task, width=100)
         self.cancel_btn.pack(side="right")
 
@@ -187,22 +164,21 @@ class PDFToolApp:
 
     def browse_file(self):
         mode = self.mode_var.get()
-        if mode in ["PPT", "WORD", "PDF2IMG"]:
-            file_paths = filedialog.askopenfilenames(title="選擇檔案", filetypes=[("PDF/Images", "*.pdf;*.jpg;*.jpeg;*.png")])
+        if mode in ["PPT", "WORD", "PDF2IMG", "REBUILD"]:
+            file_paths = filedialog.askopenfilenames(title="選擇檔案", filetypes=[("PDF/Images", "*.pdf;*.jpg;*.png")])
         else:
             file_paths = filedialog.askopenfilenames(title="選擇檔案", filetypes=[("PDF Files", "*.pdf")])
         if file_paths: self.process_selected_files(file_paths)
 
     def process_selected_files(self, file_paths):
         mode = self.mode_var.get()
-        valid_files = [f for f in file_paths if f.lower().endswith(('.pdf', '.jpg', '.jpeg', '.png'))]
+        valid_files = [f for f in file_paths if f.lower().endswith(('.pdf', '.jpg', '.png'))]
         if not valid_files: return messagebox.showerror("錯誤", "請提供有效的檔案！")
 
         first_file_name = os.path.splitext(os.path.basename(valid_files[0]))[0]
 
-        # 如果是合併模式，跳出排序管理器，中斷當前流程
         if mode == "MERGE":
-            MergeManagerWindow(self.root, valid_files, lambda sorted_files: self.trigger_merge_process(sorted_files, first_file_name))
+            MergeManagerWindow(self.root, valid_files, lambda sf: self.trigger_merge_process(sf, first_file_name))
             return
 
         output_path = None
@@ -215,6 +191,8 @@ class PDFToolApp:
             valid_files = [valid_files[0], pwd] 
         elif mode == "COMPRESS":
             output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_compressed.pdf", defaultextension=".pdf")
+        elif mode == "REBUILD":
+            output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_clean.pdf", defaultextension=".pdf")
         elif mode in ["PPT", "WORD"]:
             if len(valid_files) == 1:
                 ext = ".pptx" if mode == "PPT" else ".docx"
@@ -227,10 +205,8 @@ class PDFToolApp:
             self.start_thread(mode, valid_files, output_path)
 
     def trigger_merge_process(self, sorted_files, first_file_name):
-        """ 由 MergeManagerWindow 觸發的實際合併儲存流程 """
-        output_path = filedialog.asksaveasfilename(title="儲存合併後的 PDF", initialfile=f"{first_file_name}_merged.pdf", defaultextension=".pdf", filetypes=[("PDF Files", "*.pdf")])
-        if output_path:
-            self.start_thread("MERGE", sorted_files, output_path)
+        output_path = filedialog.asksaveasfilename(title="儲存合併後的 PDF", initialfile=f"{first_file_name}_merged.pdf", defaultextension=".pdf")
+        if output_path: self.start_thread("MERGE", sorted_files, output_path)
 
     def start_thread(self, mode, input_data, output_data):
         self.set_ui_state("disabled")
@@ -245,17 +221,14 @@ class PDFToolApp:
             self.cancel_btn.configure(state="normal")
             self.drop_frame.unbind("<Button-1>")
             self.status_label.unbind("<Button-1>")
-            self.root.dnd_bind('<<Drop>>', '')
         else:
             self.cancel_btn.configure(state="disabled")
             self.drop_frame.bind("<Button-1>", lambda e: self.browse_file())
             self.status_label.bind("<Button-1>", lambda e: self.browse_file())
-            self.root.dnd_bind('<<Drop>>', self.on_drop)
 
     def update_status(self, text, progress=None):
         self.root.after(0, lambda: self.status_label.configure(text=text))
-        if progress is not None:
-            self.root.after(0, lambda: self.progress_bar.set(progress))
+        if progress is not None: self.root.after(0, lambda: self.progress_bar.set(progress))
 
     def run_task_router(self, mode, input_data, output_data):
         try:
@@ -264,11 +237,13 @@ class PDFToolApp:
             if mode == "MERGE": process_merge_pdfs(input_data, output_data, **kwargs)
             elif mode == "SPLIT": process_split_pdf(input_data[0], output_data, **kwargs)
             elif mode == "PROTECT": process_protect_pdf(input_data[0], output_data, input_data[1], **kwargs)
-            elif mode == "PDF2IMG": process_pdf_to_images(input_data[0], output_data, **kwargs)
+            elif mode == "PDF2IMG": process_pdf_to_images(input_data[0], output_data, rm_wm=self.rm_watermark_var.get(), **kwargs)
             elif mode == "COMPRESS": process_compress_pdf(input_data[0], output_data, **kwargs)
+            elif mode == "REBUILD": process_rebuild_pdf(input_data[0], output_data, rm_wm=self.rm_watermark_var.get(), **kwargs)
             elif mode in ["PPT", "WORD"]:
                 ocr_kwargs = kwargs.copy()
                 ocr_kwargs['use_gpu'] = self.use_gpu_var.get()
+                ocr_kwargs['rm_wm'] = self.rm_watermark_var.get()
                 if mode == "PPT": ocr_kwargs['white_bg'] = self.white_bg_var.get()
                 
                 if input_data[0] == "BATCH_MODE":
@@ -287,7 +262,6 @@ class PDFToolApp:
 
             if self.stop_event.is_set():
                 self.update_status("⛔ 任務已取消", 0)
-                messagebox.showinfo("取消", "已成功中斷任務。")
             else:
                 self.update_status("✅ 任務完成！可以繼續處理下一個檔案", 1)
                 messagebox.showinfo("完成", "作業成功！檔案已處理完成。")
