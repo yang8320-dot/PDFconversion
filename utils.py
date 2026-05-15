@@ -1,10 +1,17 @@
 import os
 import sys
 
-def get_poppler_path():
-    """ 取得 Poppler 執行檔路徑，相容開發與打包環境 """
+def get_base_path():
+    """ 取得程式執行時的根目錄 """
     if getattr(sys, 'frozen', False):
-        base_dir = os.path.dirname(sys.executable)
-        return os.path.join(base_dir, "Library", "poppler_bin")
+        return os.path.dirname(sys.executable)
     else:
-        return os.path.join(os.path.abspath("."), "Library", "poppler_bin")
+        return os.path.abspath(".")
+
+def get_poppler_path():
+    """ 取得 Poppler 執行檔路徑 """
+    return os.path.join(get_base_path(), "Library", "poppler_bin")
+
+def get_model_path():
+    """ 取得 EasyOCR 離線模型路徑，解決 407 Proxy 問題 """
+    return os.path.join(get_base_path(), "Library", "model")
