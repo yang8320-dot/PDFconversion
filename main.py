@@ -41,18 +41,23 @@ class CTkinterDnD(ctk.CTk, TkinterDnD.DnDWrapper):
         self.TkdndVersion = TkinterDnD._require(self)
 
 class ListManagerWindow(ctk.CTkToplevel):
-    def __init__(self, parent, initial_files, mode, start_callback):
-        super().__init__(parent)
+    def __init__(self, app, initial_files, mode, start_callback):
+        super().__init__(app.root)
         self.title("檔案合併管理器")
         self.geometry("600x350")
         self.start_callback = start_callback
         self.mode = mode
-        self.transient(parent)
-        self.grab_set()
+        self.app = app
+        self.transient(app.root)
+        
+        # 移除強制鎖死，改用控制主畫面 UI 狀態，讓主視窗可移動
+        self.app.set_ui_state("disabled")
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
 
         list_frame = ctk.CTkFrame(self, fg_color="transparent")
         list_frame.pack(side="left", fill="both", expand=True, padx=(15, 5), pady=15)
-        ctk.CTkLabel(list_frame, text="合併檔案列表 (由上到下)：", font=("Microsoft JhengHei", 14, "bold")).pack(anchor="w", pady=(0, 5))
+        
+        ctk.CTkLabel(list_frame, text="合併檔案列表 (支援直接拖曳檔案進來)：", font=("Microsoft JhengHei", 14, "bold")).pack(anchor="w", pady=(0, 5))
         
         scrollbar = tk.Scrollbar(list_frame)
         scrollbar.pack(side="right", fill="y")
@@ -64,7 +69,6 @@ class ListManagerWindow(ctk.CTkToplevel):
         btn_frame = ctk.CTkFrame(self)
         btn_frame.pack(side="right", fill="y", padx=(5, 15), pady=15)
         
-        # 根據模式決定可以選擇的副檔名
         if mode == "MERGE":
             file_types = [("支援的檔案 (PDF/圖/Word)", "*.pdf;*.jpg;*.jpeg;*.png;*.docx;*.doc")]
         else:
@@ -75,6 +79,21 @@ class ListManagerWindow(ctk.CTkToplevel):
         ctk.CTkButton(btn_frame, text="⬇️ 下移", command=self.move_down).pack(pady=5)
         ctk.CTkButton(btn_frame, text="❌ 移除", command=self.remove_item, fg_color="#cc3333", hover_color="#aa2222").pack(pady=5)
         ctk.CTkButton(btn_frame, text="🚀 開始合併", command=self.start_merge, fg_color="#28a745", hover_color="#218838", height=35).pack(side="bottom", pady=15)
+
+        # 支援拖曳到子視窗
+        self.drop_target_register(DND_FILES)
+        self.dnd_bind('<<Drop>>', self.on_drop)
+
+    def on_drop(self, event):
+        files = self.tk.splitlist(event.data)
+        valid_exts = ('.pdf', '.jpg', '.jpeg', '.png', '.docx', '.doc') if self.mode == "MERGE" else ('.jpg', '.jpeg', '.png')
+        for f in files:
+            if f.lower().endswith(valid_exts):
+                self.listbox.insert(tk.END, f)
+
+    def on_close(self):
+        self.app.set_ui_state("normal")
+        self.destroy()
 
     def move_up(self):
         try:
@@ -119,7 +138,6 @@ class PDFToolApp:
         mode_frame.pack(fill="x", padx=15, pady=(10, 5))
         for i in range(5): mode_frame.grid_columnconfigure(i, weight=1, uniform="col_group")
         
-        # 更改了合併按鈕的名稱，提示支援Word
         modes1 = [("PDF 轉 PPT", "PPT"), ("PDF 轉圖片", "PDF2IMG"), ("圖片轉 PDF", "IMG2PDF"), ("提取純文字", "EXTRACT_TXT"), ("提取內嵌圖", "EXTRACT_IMGS")]
         modes2 = [("提取/分割 PDF", "SPLIT"), ("刪除指定頁", "REMOVE_PAGES"), ("插入空白頁", "INSERT_BLANK"), ("重新排序頁", "REORDER"), ("萬能合併(含Word)", "MERGE")]
         modes3 = [("轉黑白/灰階", "GRAYSCALE"), ("扁平化(防篡改)", "FLATTEN"), ("PDF 壓縮", "COMPRESS"), ("PDF 旋轉", "ROTATE"), ("添加頁碼", "ADD_PAGE_NUM")]
@@ -189,7 +207,6 @@ class PDFToolApp:
         elif mode == "IMG2PDF":
             file_paths = filedialog.askopenfilenames(title="選擇檔案", filetypes=[("Images", "*.jpg;*.jpeg;*.png")])
         elif mode == "MERGE":
-            # 讓萬能合併模式可以選到 Word 跟 圖片
             file_paths = filedialog.askopenfilenames(title="選擇檔案", filetypes=[("支援的檔案 (PDF/圖/Word)", "*.pdf;*.jpg;*.jpeg;*.png;*.docx;*.doc")])
         else: 
             file_paths = filedialog.askopenfilenames(title="選擇檔案", filetypes=[("PDF Files", "*.pdf")])
@@ -199,7 +216,6 @@ class PDFToolApp:
     def process_selected_files(self, file_paths):
         mode = self.mode_var.get()
         
-        # 根據模式放寬副檔名限制
         valid_exts = ('.pdf', '.jpg', '.jpeg', '.png')
         if mode == "MERGE": valid_exts = ('.pdf', '.jpg', '.jpeg', '.png', '.docx', '.doc')
             
@@ -214,7 +230,8 @@ class PDFToolApp:
                 return messagebox.showwarning("檔案已加密", "⚠️ 此 PDF 受到密碼保護！\n\n請先選擇「解鎖 PDF」功能，輸入密碼將其解密為一般檔案後，再進行操作。")
 
         if mode in ["MERGE", "IMG2PDF"]: 
-            return ListManagerWindow(self.root, valid_files, mode, lambda sf: self.trigger_list_process(mode, sf, first_file_name))
+            # 修正：傳入 self 而非 self.root
+            return ListManagerWindow(self, valid_files, mode, lambda sf: self.trigger_list_process(mode, sf, first_file_name))
 
         output_path = None
         extra_args = {}
