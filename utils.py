@@ -3,9 +3,8 @@ import sys
 from PIL import ImageDraw
 
 def get_base_path():
-    """ 取得程式執行時的根目錄 (支援 PyInstaller 打包的 sys._MEIPASS 暫存目錄) """
     if getattr(sys, 'frozen', False):
-        return sys._MEIPASS # 打包成單一執行檔時，檔案會被解壓縮到這個暫存目錄
+        return sys._MEIPASS
     else:
         return os.path.abspath(".")
 
@@ -16,23 +15,28 @@ def get_model_path():
     return os.path.join(get_base_path(), "Library", "model")
 
 def apply_watermark_removal(img):
-    """ 去除 NotebookLM 右下角浮水印：採樣背景色並進行智慧覆蓋 """
+    """ 去除 NotebookLM 浮水印：精準鎖定右下角，遮蔽範圍擴大至 125% """
     draw = ImageDraw.Draw(img)
     width, height = img.size
     
-    # 鎖定 NotebookLM 浮水印位置 (大約在右下角 25% 寬度, 8% 高度的範圍內)
-    wm_w = int(width * 0.25)
-    wm_h = int(height * 0.08)
-    box = [width - wm_w, height - wm_h, width, height]
+    # 預估 NotebookLM 浮水印的預設大小 (約寬度 15%, 高度 5%)
+    wm_w = int(width * 0.15)
+    wm_h = int(height * 0.05)
     
-    # 在浮水印正上方不遠處，採集原本的「背景底色」
-    sample_x = width - wm_w + 10
-    sample_y = height - wm_h - 15
+    # 依使用者需求，將遮蔽範圍放大至 125%
+    mask_w = int(wm_w * 1.25)
+    mask_h = int(wm_h * 1.25)
+    
+    box = [width - mask_w, height - mask_h, width, height]
+    
+    # 在浮水印遮蔽區塊的「左上方」一點點採集背景顏色
+    sample_x = width - mask_w - 10
+    sample_y = height - mask_h - 10
     try:
         bg_color = img.getpixel((sample_x, sample_y))
     except:
-        bg_color = (255, 255, 255) # 萬一超出邊界，預設白色
+        bg_color = (255, 255, 255) # 萬一取樣失敗預設為白色
         
-    # 用採集到的底色畫一個無邊框矩形，完美覆蓋浮水印
+    # 用採集到的底色進行覆蓋填滿
     draw.rectangle(box, fill=bg_color, outline=bg_color)
     return img
