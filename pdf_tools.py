@@ -624,4 +624,27 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
                         py0 = min(y_coords) * scale
                         pw = (max(x_coords) - min(x_coords)) * scale
                         ph = (max(y_coords) - min(y_coords)) * scale
-                        text_boxes_data.append({"text": text,
+                        text_boxes_data.append({"text": text, "x": px0, "y": py0, "w": pw, "h": ph})
+                        
+                    img.save(img_path, "JPEG", quality=95)
+                    slide.shapes.add_picture(img_path, 0, 0, prs.slide_width, prs.slide_height)
+                    
+                    for item in text_boxes_data:
+                        txBox = slide.shapes.add_textbox(Pt(item["x"]), Pt(item["y"]), Pt(item["w"]), Pt(item["h"]))
+                        tf = txBox.text_frame
+                        tf.clear()
+                        tf.word_wrap = False
+                        p = tf.paragraphs[0]
+                        run = p.add_run()
+                        run.text = item["text"]
+                        
+                        # OCR 圖片模式同樣套用預設值
+                        run.font.size = Pt(max(8, item["h"] * 0.75))
+                        run.font.name = "微軟正黑體"
+                        run.font.color.rgb = RGBColor(0, 0, 0)
+                else:
+                    slide.shapes.add_picture(img_path, 0, 0, prs.slide_width, prs.slide_height)
+        
+        if not stop_event.is_set():
+            status_callback("💾 正在儲存檔案...", 0.95)
+            prs.save(output_path)
