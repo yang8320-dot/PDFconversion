@@ -1,5 +1,7 @@
 import os
 import sys
+import platform
+import subprocess
 from PIL import ImageDraw
 
 def get_base_path():
@@ -14,29 +16,53 @@ def get_poppler_path():
 def get_model_path():
     return os.path.join(get_base_path(), "Library", "model")
 
-def apply_watermark_removal(img):
-    """ 去除 NotebookLM 浮水印：精準鎖定右下角，遮蔽範圍擴大至 125% """
+def check_poppler_exists():
+    return os.path.exists(get_poppler_path())
+
+def open_file_or_folder(path):
+    """完成後自動打開檔案所在資料夾"""
+    try:
+        target = path if os.path.isdir(path) else os.path.dirname(path)
+        if platform.system() == "Windows":
+            os.startfile(target)
+        elif platform.system() == "Darwin":
+            subprocess.call(["open", target])
+        else:
+            subprocess.call(["xdg-open", target])
+    except: pass
+
+def format_size(size_in_bytes):
+    """格式化檔案大小"""
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if size_in_bytes < 1024: return f"{size_in_bytes:.2f} {unit}"
+        size_in_bytes /= 1024
+    return f"{size_in_bytes:.2f} TB"
+
+def apply_watermark_removal(img, position="右下角"):
+    """ 去除浮水印：可自訂角落位置，遮蔽範圍為 125% """
     draw = ImageDraw.Draw(img)
     width, height = img.size
     
-    # 預估 NotebookLM 浮水印的預設大小 (約寬度 15%, 高度 5%)
-    wm_w = int(width * 0.15)
-    wm_h = int(height * 0.05)
+    # 預估浮水印大小 (約寬度 15%, 高度 5%) 並放大遮蔽範圍
+    mask_w = int(width * 0.15 * 1.25)
+    mask_h = int(height * 0.05 * 1.25)
     
-    # 依使用者需求，將遮蔽範圍放大至 125%
-    mask_w = int(wm_w * 1.25)
-    mask_h = int(wm_h * 1.25)
+    # 根據位置計算遮蔽座標與取樣座標
+    if position == "右下角":
+        box = [width - mask_w, height - mask_h, width, height]
+        sample_pt = (width - mask_w - 10, height - mask_h - 10)
+    elif position == "左下角":
+        box = [0, height - mask_h, mask_w, height]
+        sample_pt = (mask_w + 10, height - mask_h - 10)
+    elif position == "右上角":
+        box = [width - mask_w, 0, width, mask_h]
+        sample_pt = (width - mask_w - 10, mask_h + 10)
+    else: # 左上角
+        box = [0, 0, mask_w, mask_h]
+        sample_pt = (mask_w + 10, mask_h + 10)
     
-    box = [width - mask_w, height - mask_h, width, height]
-    
-    # 在浮水印遮蔽區塊的「左上方」一點點採集背景顏色
-    sample_x = width - mask_w - 10
-    sample_y = height - mask_h - 10
-    try:
-        bg_color = img.getpixel((sample_x, sample_y))
-    except:
-        bg_color = (255, 255, 255) # 萬一取樣失敗預設為白色
+    try: bg_color = img.getpixel(sample_pt)
+    except: bg_color = (255, 255, 255) 
         
-    # 用採集到的底色進行覆蓋填滿
     draw.rectangle(box, fill=bg_color, outline=bg_color)
     return img
