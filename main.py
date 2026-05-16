@@ -16,14 +16,11 @@ from tkinter import filedialog, messagebox
 from tkinterdnd2 import DND_FILES, TkinterDnD
 import customtkinter as ctk
 
-from pdf_tools import (process_merge_pdfs, process_protect_pdf, process_split_pdf, process_pdf_to_images, 
-                       process_compress_pdf, process_remove_watermark, process_pdf_to_ppt, 
-                       process_images_to_pdf, process_unlock_pdf, process_rotate_pdf, process_add_watermark,
-                       process_remove_pages, process_to_grayscale, process_extract_text, process_insert_blank_page,
-                       process_add_page_numbers, process_reorder_pages, process_extract_original_images,
-                       process_flatten_pdf, process_add_image_watermark,
-                       process_image_ocr, process_image_remove_text,
-                       process_pdf_to_word, process_pdf_to_excel, process_redact_text, process_crop_pdf)
+# 從 4 個獨立模組載入功能
+from tool_conversion import process_pdf_to_word, process_pdf_to_excel, process_pdf_to_images, process_images_to_pdf, process_pdf_to_ppt
+from tool_edit import process_split_pdf, process_remove_pages, process_insert_blank_page, process_reorder_pages, process_merge_pdfs, process_crop_pdf
+from tool_security import process_to_grayscale, process_flatten_pdf, process_compress_pdf, process_rotate_pdf, process_protect_pdf, process_unlock_pdf
+from tool_ai import process_extract_text, process_extract_original_images, process_add_watermark, process_add_image_watermark, process_redact_text, process_remove_watermark, process_image_ocr, process_image_remove_text, process_add_page_numbers
 
 from utils import check_poppler_exists, open_file_or_folder, get_base_path
 
@@ -234,7 +231,6 @@ class PDFToolApp:
         self.log_box.insert("end", f"[{time_str}] {text}\n")
         self.log_box.see("end")
         self.log_box.configure(state="disabled")
-        # 同步更新上方精簡狀態列
         self.status_label.configure(text=text)
 
     def update_options_ui(self, *args):
