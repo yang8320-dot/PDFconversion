@@ -142,8 +142,10 @@ class PDFToolApp:
         self.theme_switch = ctk.CTkSwitch(top_frame, text="深色模式", command=self.toggle_theme, font=("Microsoft JhengHei", 11), width=50)
         self.theme_switch.pack(side="right", padx=5)
 
-        # 核心：標籤頁設計 (移除固定高度，讓它自動適應內容)
-        self.tabview = ctk.CTkTabview(self.root)
+        # ---------------------------------------------------------
+        # 【修正核心 1】強制限制標籤頁高度為 140，剛好包覆兩排按鈕
+        # ---------------------------------------------------------
+        self.tabview = ctk.CTkTabview(self.root, height=140)
         self.tabview.pack(fill="x", padx=10, pady=2)
         
         tab1 = self.tabview.add("📂 格式轉換")
@@ -167,7 +169,7 @@ class PDFToolApp:
         create_radio_buttons(tab3, modes_t3)
         create_radio_buttons(tab4, modes_t4)
 
-        # 動態選項區容器 (這裡先不 pack，交給後面的邏輯動態決定)
+        # 動態選項區容器
         self.opt_frame = ctk.CTkFrame(self.root, fg_color="#eef5fa", corner_radius=6)
         
         self.extract_mode_var = ctk.StringVar(value="PDF 原生文字提取")
@@ -197,7 +199,9 @@ class PDFToolApp:
         self.menu_rm_mode.configure(command=self.update_options_ui)
         self.mode_var.trace_add("write", self.update_options_ui)
 
-        # 拖曳區 (設定 expand=True 讓它自動填補所有剩餘空間)
+        # ---------------------------------------------------------
+        # 拖曳區保持 Expand=True，吸收掉畫面中所有的空白區域
+        # ---------------------------------------------------------
         self.drop_frame = ctk.CTkFrame(self.root, fg_color="#f9f9f9", border_width=2, border_color="#3a7ebf", corner_radius=10)
         self.drop_frame.pack(fill="both", expand=True, padx=10, pady=5)
         self.drop_frame.pack_propagate(False)
@@ -219,7 +223,6 @@ class PDFToolApp:
         self.log_box.pack(fill="x", padx=10, pady=(5, 10))
         self.write_log("✅ 系統初始化完成，等待任務輸入...")
 
-        # 強制執行一次畫面選項更新
         self.update_options_ui()
 
     def toggle_theme(self):
@@ -236,14 +239,12 @@ class PDFToolApp:
         self.log_box.configure(state="disabled")
 
     def update_options_ui(self, *args):
-        # 1. 先把選項區內所有的元件清空隱藏
         for widget in self.opt_frame.winfo_children(): 
             widget.pack_forget()
             
         mode = self.mode_var.get()
         has_options = False
         
-        # 2. 依照不同模式，塞入需要的選項
         if mode == "EXTRACT_TXT":
             self.lbl_ext_mode.pack(side="left", padx=(5, 2), pady=3); self.menu_ext_mode.pack(side="left", padx=(0, 10))
             has_options = True
@@ -267,8 +268,6 @@ class PDFToolApp:
             self.lbl_rot.pack(side="left", padx=(5, 2), pady=3); self.menu_rot.pack(side="left", padx=(0, 10))
             has_options = True
 
-        # 3. 【關鍵修復】如果沒有任何選項，直接把選項外框隱藏！
-        # 讓出空間給下方的「拖曳區」自動放大填滿。
         if has_options:
             self.opt_frame.pack(fill="x", padx=10, pady=2, after=self.tabview)
         else:
@@ -465,19 +464,4 @@ class PDFToolApp:
                 msg = result_msg if result_msg else "✅ 任務完成！"
                 self.update_status(msg, 1.0)
                 self.root.after(0, lambda: messagebox.showinfo("成功", msg))
-                open_file_or_folder(output_data)
-            else:
-                self.update_status("⚠️ 任務已取消", 0)
-
-        except Exception as e:
-            self.update_status(f"❌ 錯誤: {str(e)}", 0)
-            self.root.after(0, lambda: messagebox.showerror("錯誤", f"處理過程中發生錯誤：\n{str(e)}"))
-        finally:
-            self.root.after(0, lambda: self.set_ui_state("normal"))
-
-if __name__ == "__main__":
-    check_single_instance()
-    set_dpi_awareness()
-    root = CTkinterDnD()
-    app = PDFToolApp(root)
-    root.mainloop()
+                open_file_or_folder(output_data
