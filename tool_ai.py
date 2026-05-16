@@ -182,7 +182,16 @@ def process_image_remove_text(input_file, output_path, status_callback, stop_eve
     else: inpainted_img = img 
 
     status_callback("💾 正在儲存無文字圖片...", 0.9)
-    if not cv2.imencode(os.path.splitext(output_path)[1], inpainted_img)[1].tofile(output_path): raise Exception("儲存圖片失敗！")
+    
+    # 【修正區塊】分開執行 imencode 編碼與 tofile 寫入，解決假報錯 Bug
+    ext = os.path.splitext(output_path)[1]
+    if not ext: ext = ".jpg"
+    
+    success, encoded_img = cv2.imencode(ext, inpainted_img)
+    if success:
+        encoded_img.tofile(output_path)
+    else:
+        raise Exception("儲存圖片失敗！影像編碼發生錯誤。")
 
 def process_add_page_numbers(input_file, output_path, status_callback, stop_event):
     import fitz
