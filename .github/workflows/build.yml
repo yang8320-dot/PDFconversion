@@ -59,10 +59,10 @@ jobs:
         
         $EXCLUDES = "--exclude-module matplotlib --exclude-module IPython --exclude-module pytest --exclude-module torch --exclude-module torchvision --exclude-module easyocr"
         
-        # 【修正】加入 bs4, rapid_layout, rapid_table 的隱藏依賴
-        $HIDDEN = "--hidden-import win32timezone --hidden-import win32com --hidden-import fitz --hidden-import pymupdf --hidden-import pptx --hidden-import opencc --hidden-import rapidocr_onnxruntime --hidden-import rapid_layout --hidden-import rapid_table --hidden-import bs4"
+        # 【修正】加入 pdf_tools 和 utils 作為強制隱藏依賴，解決 No module named 錯誤
+        $HIDDEN = "--hidden-import win32timezone --hidden-import win32com --hidden-import fitz --hidden-import pymupdf --hidden-import pptx --hidden-import opencc --hidden-import rapidocr_onnxruntime --hidden-import rapid_layout --hidden-import rapid_table --hidden-import bs4 --hidden-import pdf_tools --hidden-import utils"
         
-        # 【修正】強制收集 OCR、版面分析、表格還原與 ONNX 引擎的核心函式庫
+        # 強制收集 OCR、版面分析、表格還原與 ONNX 引擎的核心函式庫
         $COLLECT = "--collect-data rapidocr_onnxruntime --collect-all onnxruntime --collect-all opencc --collect-all cv2 --collect-all fitz --collect-all rapid_layout --collect-all rapid_table"
         
         if ($MODE -eq 'Full (完整打包 - 含 Poppler 引擎與所有函式庫)') {
