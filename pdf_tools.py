@@ -474,7 +474,6 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
             text_boxes_data = []
             table_html_data = []
             
-            # 安全獲取 Layout 分析結果 (兼容 tuple、list、dataclass)
             raw_layout = layout_engine(hr_img_path)
             regions = []
             if isinstance(raw_layout, tuple): raw_layout = raw_layout[0]
@@ -489,7 +488,6 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
             if regions:
                 for box, label in regions:
                     if box is None or label is None: continue
-                    # 確保 box 是扁平的 [x0, y0, x1, y1]
                     if len(box) == 4 and not isinstance(box[0], (list, tuple, np.ndarray)):
                         bx0, by0, bx1, by1 = box
                     else:
@@ -536,7 +534,6 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
                                     bg_color = get_dynamic_bg_color(img_obj, exp_px_bbox)
                                     draw.rectangle(exp_px_bbox, fill=bg_color)
             else:
-                #  fallback 全圖 OCR
                 raw_ocr = ocr_engine(hr_img_path)
                 ocr_res = raw_ocr[0] if isinstance(raw_ocr, tuple) else raw_ocr
                 if ocr_res:
@@ -613,3 +610,12 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
             slide = prs.slides.add_slide(blank_slide_layout)
 
             if ppt_mode == "純圖片簡報 (較快)":
+                status_callback("🖼️ 正在處理圖片檔案...", 0.5)
+                slide.shapes.add_picture(normal_path, 0, 0, prs.slide_width, prs.slide_height)
+            else:
+                status_callback("👁️ 進行版面分析與雙軌重建...", 0.5)
+                process_slide(hr_path, normal_path, slide, scale_down=1.0/4.0)
+
+        if not stop_event.is_set():
+            status_callback("💾 正在儲存檔案...", 0.95)
+            prs.save(output_path)
