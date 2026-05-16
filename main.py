@@ -142,8 +142,8 @@ class PDFToolApp:
         self.theme_switch = ctk.CTkSwitch(top_frame, text="深色模式", command=self.toggle_theme, font=("Microsoft JhengHei", 11), width=50)
         self.theme_switch.pack(side="right", padx=5)
 
-        # 核心：標籤頁設計 
-        self.tabview = ctk.CTkTabview(self.root, height=120)
+        # 核心：標籤頁設計 (移除固定高度，讓它自動適應內容)
+        self.tabview = ctk.CTkTabview(self.root)
         self.tabview.pack(fill="x", padx=10, pady=2)
         
         tab1 = self.tabview.add("📂 格式轉換")
@@ -167,9 +167,8 @@ class PDFToolApp:
         create_radio_buttons(tab3, modes_t3)
         create_radio_buttons(tab4, modes_t4)
 
-        # 動態選項區
+        # 動態選項區容器 (這裡先不 pack，交給後面的邏輯動態決定)
         self.opt_frame = ctk.CTkFrame(self.root, fg_color="#eef5fa", corner_radius=6)
-        self.opt_frame.pack(fill="x", padx=10, pady=2)
         
         self.extract_mode_var = ctk.StringVar(value="PDF 原生文字提取")
         self.rm_mode_var = ctk.StringVar(value="PDF 區域去浮水印")
@@ -198,7 +197,7 @@ class PDFToolApp:
         self.menu_rm_mode.configure(command=self.update_options_ui)
         self.mode_var.trace_add("write", self.update_options_ui)
 
-        # 拖曳區 
+        # 拖曳區 (設定 expand=True 讓它自動填補所有剩餘空間)
         self.drop_frame = ctk.CTkFrame(self.root, fg_color="#f9f9f9", border_width=2, border_color="#3a7ebf", corner_radius=10)
         self.drop_frame.pack(fill="both", expand=True, padx=10, pady=5)
         self.drop_frame.pack_propagate(False)
@@ -220,11 +219,8 @@ class PDFToolApp:
         self.log_box.pack(fill="x", padx=10, pady=(5, 10))
         self.write_log("✅ 系統初始化完成，等待任務輸入...")
 
-        # =========================================================
-        # 【修正核心】將畫面初始化的計算移到最後，並強制更新視窗尺寸
-        # =========================================================
+        # 強制執行一次畫面選項更新
         self.update_options_ui()
-        self.root.update_idletasks()
 
     def toggle_theme(self):
         mode = "dark" if self.theme_switch.get() == 1 else "light"
@@ -240,25 +236,43 @@ class PDFToolApp:
         self.log_box.configure(state="disabled")
 
     def update_options_ui(self, *args):
-        for widget in self.opt_frame.winfo_children(): widget.pack_forget()
+        # 1. 先把選項區內所有的元件清空隱藏
+        for widget in self.opt_frame.winfo_children(): 
+            widget.pack_forget()
+            
         mode = self.mode_var.get()
+        has_options = False
         
+        # 2. 依照不同模式，塞入需要的選項
         if mode == "EXTRACT_TXT":
             self.lbl_ext_mode.pack(side="left", padx=(5, 2), pady=3); self.menu_ext_mode.pack(side="left", padx=(0, 10))
+            has_options = True
         if mode == "RMWATERMARK":
             self.lbl_rm_mode.pack(side="left", padx=(5, 2), pady=3); self.menu_rm_mode.pack(side="left", padx=(0, 10))
             if self.rm_mode_var.get() == "PDF 區域去浮水印":
                 self.lbl_dpi.pack(side="left", padx=(5, 2), pady=3); self.menu_dpi.pack(side="left", padx=(0, 10))
                 self.lbl_wm.pack(side="left", padx=(5, 2), pady=3); self.menu_wm.pack(side="left", padx=(0, 10))
+            has_options = True
         if mode in ["PPT", "PDF2IMG", "GRAYSCALE", "FLATTEN"]:
             self.lbl_dpi.pack(side="left", padx=(5, 2), pady=3); self.menu_dpi.pack(side="left", padx=(0, 10))
+            has_options = True
         if mode == "PPT":
             self.lbl_ppt.pack(side="left", padx=(5, 2), pady=3); self.menu_ppt.pack(side="left", padx=(0, 10))
+            has_options = True
         if mode == "IMG_WM":
             self.lbl_stamp.pack(side="left", padx=(5, 2), pady=3); self.menu_stamp.pack(side="left", padx=(0, 10))
             self.lbl_wm.pack(side="left", padx=(5, 2), pady=3); self.menu_wm.pack(side="left", padx=(0, 10))
+            has_options = True
         if mode == "ROTATE":
             self.lbl_rot.pack(side="left", padx=(5, 2), pady=3); self.menu_rot.pack(side="left", padx=(0, 10))
+            has_options = True
+
+        # 3. 【關鍵修復】如果沒有任何選項，直接把選項外框隱藏！
+        # 讓出空間給下方的「拖曳區」自動放大填滿。
+        if has_options:
+            self.opt_frame.pack(fill="x", padx=10, pady=2, after=self.tabview)
+        else:
+            self.opt_frame.pack_forget()
 
     def cancel_task(self):
         self.stop_event.set()
@@ -297,7 +311,7 @@ class PDFToolApp:
 
         if mode != "UNLOCK" and first_file.lower().endswith(".pdf"):
             if check_is_encrypted(first_file):
-                return messagebox.showwarning("檔案已加密", "⚠️ 此 PDF 受到密保護！請先使用「解鎖 PDF」功能。")
+                return messagebox.showwarning("檔案已加密", "⚠️ 此 PDF 受到密碼保護！請先使用「解鎖 PDF」功能。")
 
         if mode in ["MERGE", "IMG2PDF"]: 
             return ListManagerWindow(self, valid_files, mode, lambda sf: self.trigger_list_process(mode, sf, first_file_name))
