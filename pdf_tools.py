@@ -382,6 +382,8 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
     from collections import Counter
     import opencc
     from bs4 import BeautifulSoup
+    import cv2
+    import numpy as np
     
     # 強制繁化
     converter = opencc.OpenCC('s2twp')
@@ -474,12 +476,23 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
             text_boxes_data = []
             table_html_data = []
             
-            # 【修正重點 1】使用 numpy 和 cv2.imdecode 讀取，解決 Windows 暫存目錄包含中文導致 cv2.imread 失敗的問題
+            # 解決 Windows 中文路徑報錯
             hr_img = cv2.imdecode(np.fromfile(hr_img_path, dtype=np.uint8), cv2.IMREAD_COLOR)
             if hr_img is None:
-                return # 若圖片讀取異常則安全跳過，避免崩潰
-            
-            # 【修正重點 2】直接傳入記憶體中的圖片陣列給排版引擎
+                return 
+
+            # AI 視覺預處理模組 (提升辨識率)
+            def enhance_for_ocr(image):
+                try:
+                    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+                    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+                    enhanced = clahe.apply(gray)
+                    kernel = np.array([[0, -0.5, 0], [-0.5, 3, -0.5], [0, -0.5, 0]])
+                    sharpened = cv2.filter2D(enhanced, -1, kernel)
+                    return cv2.cvtColor(sharpened, cv2.COLOR_GRAY2BGR)
+                except:
+                    return image 
+
             raw_layout = layout_engine(hr_img)
             regions = []
             if isinstance(raw_layout, tuple): raw_layout = raw_layout[0]
@@ -503,10 +516,10 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
                     x0, y0, x1, y1 = [v * scale_down for v in [bx0, by0, bx1, by1]]
                     
                     if label == 'table':
-                        # 【修正重點 3】不用再重新讀取圖片，直接從記憶體裁切，提升效能並防錯
                         table_crop = hr_img[int(by0):int(by1), int(bx0):int(bx1)]
                         if table_crop is not None and table_crop.size > 0:
-                            raw_table = table_engine(table_crop)
+                            enhanced_table = enhance_for_ocr(table_crop)
+                            raw_table = table_engine(enhanced_table)
                             table_res = raw_table[0] if isinstance(raw_table, tuple) else raw_table
                             
                             html_str = None
@@ -521,10 +534,10 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
                                 draw.rectangle(exp_px_bbox, fill=bg_color)
                                 
                     elif label in ['text', 'title', 'figure']:
-                        # 【修正重點 4】不用再重新讀取圖片
                         text_crop = hr_img[int(by0):int(by1), int(bx0):int(bx1)]
                         if text_crop is not None and text_crop.size > 0:
-                            raw_ocr = ocr_engine(text_crop)
+                            enhanced_text = enhance_for_ocr(text_crop)
+                            raw_ocr = ocr_engine(enhanced_text)
                             ocr_res = raw_ocr[0] if isinstance(raw_ocr, tuple) else raw_ocr
                             if ocr_res:
                                 for line in ocr_res:
@@ -540,8 +553,8 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
                                     bg_color = get_dynamic_bg_color(img_obj, exp_px_bbox)
                                     draw.rectangle(exp_px_bbox, fill=bg_color)
             else:
-                # 【修正重點 5】直接送出記憶體中的 numpy 陣列
-                raw_ocr = ocr_engine(hr_img)
+                enhanced_full_img = enhance_for_ocr(hr_img)
+                raw_ocr = ocr_engine(enhanced_full_img)
                 ocr_res = raw_ocr[0] if isinstance(raw_ocr, tuple) else raw_ocr
                 if ocr_res:
                     for line in ocr_res:
