@@ -474,7 +474,13 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
             text_boxes_data = []
             table_html_data = []
             
-            raw_layout = layout_engine(hr_img_path)
+            # 【修正重點 1】使用 numpy 和 cv2.imdecode 讀取，解決 Windows 暫存目錄包含中文導致 cv2.imread 失敗的問題
+            hr_img = cv2.imdecode(np.fromfile(hr_img_path, dtype=np.uint8), cv2.IMREAD_COLOR)
+            if hr_img is None:
+                return # 若圖片讀取異常則安全跳過，避免崩潰
+            
+            # 【修正重點 2】直接傳入記憶體中的圖片陣列給排版引擎
+            raw_layout = layout_engine(hr_img)
             regions = []
             if isinstance(raw_layout, tuple): raw_layout = raw_layout[0]
             
@@ -497,7 +503,7 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
                     x0, y0, x1, y1 = [v * scale_down for v in [bx0, by0, bx1, by1]]
                     
                     if label == 'table':
-                        hr_img = cv2.imread(hr_img_path)
+                        # 【修正重點 3】不用再重新讀取圖片，直接從記憶體裁切，提升效能並防錯
                         table_crop = hr_img[int(by0):int(by1), int(bx0):int(bx1)]
                         if table_crop is not None and table_crop.size > 0:
                             raw_table = table_engine(table_crop)
@@ -515,7 +521,7 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
                                 draw.rectangle(exp_px_bbox, fill=bg_color)
                                 
                     elif label in ['text', 'title', 'figure']:
-                        hr_img = cv2.imread(hr_img_path)
+                        # 【修正重點 4】不用再重新讀取圖片
                         text_crop = hr_img[int(by0):int(by1), int(bx0):int(bx1)]
                         if text_crop is not None and text_crop.size > 0:
                             raw_ocr = ocr_engine(text_crop)
@@ -534,7 +540,8 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
                                     bg_color = get_dynamic_bg_color(img_obj, exp_px_bbox)
                                     draw.rectangle(exp_px_bbox, fill=bg_color)
             else:
-                raw_ocr = ocr_engine(hr_img_path)
+                # 【修正重點 5】直接送出記憶體中的 numpy 陣列
+                raw_ocr = ocr_engine(hr_img)
                 ocr_res = raw_ocr[0] if isinstance(raw_ocr, tuple) else raw_ocr
                 if ocr_res:
                     for line in ocr_res:
