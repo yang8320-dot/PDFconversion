@@ -120,7 +120,6 @@ class PDFToolApp:
     def __init__(self, root):
         self.root = root
         self.root.title("PDF 辦公室全能工具箱 PRO")
-        # 【修改點】將介面從 850x650 大幅縮小為 720x540，變得更緊湊精緻
         self.root.geometry("720x540") 
         self.root.resizable(False, False) # 固定視窗大小避免跑版
         ctk.set_appearance_mode("light")  
@@ -159,7 +158,6 @@ class PDFToolApp:
         modes_t4 = [("提取文字/OCR", "EXTRACT_TXT"), ("提取內嵌圖", "EXTRACT_IMGS"), ("加文字浮水印", "ADD_WM"), ("印章/圖片浮水印", "IMG_WM"), ("機密文字塗黑", "REDACT"), ("浮水印/文字抹除", "RMWATERMARK"), ("添加頁碼", "ADD_PAGE_NUM")]
 
         def create_radio_buttons(parent, modes_list):
-            # 將欄位從 4 欄改為 4 欄以適應縮小後的寬度
             for i, (text, val) in enumerate(modes_list):
                 row, col = divmod(i, 4)
                 ctk.CTkRadioButton(parent, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 12)).grid(row=row, column=col, padx=8, pady=5, sticky="w")
@@ -169,7 +167,7 @@ class PDFToolApp:
         create_radio_buttons(tab3, modes_t3)
         create_radio_buttons(tab4, modes_t4)
 
-        # 動態選項區 - 減小邊距
+        # 動態選項區
         self.opt_frame = ctk.CTkFrame(self.root, fg_color="#eef5fa", corner_radius=6)
         self.opt_frame.pack(fill="x", padx=10, pady=2)
         
@@ -181,7 +179,7 @@ class PDFToolApp:
         self.rotate_var = ctk.StringVar(value="90度")
         self.ppt_mode_var = ctk.StringVar(value="純圖片簡報 (較快)")
 
-        # 選項元件 - 稍微縮小字體與寬度
+        # 選項元件
         self.lbl_ext_mode = ctk.CTkLabel(self.opt_frame, text="📄 來源選項:", font=("Microsoft JhengHei", 11, "bold"))
         self.menu_ext_mode = ctk.CTkOptionMenu(self.opt_frame, variable=self.extract_mode_var, values=["PDF 原生文字提取", "圖片 AI OCR 辨識"], width=140, height=24)
         self.lbl_rm_mode = ctk.CTkLabel(self.opt_frame, text="🧹 抹除模式:", font=("Microsoft JhengHei", 11, "bold"))
@@ -203,11 +201,13 @@ class PDFToolApp:
         self.mode_var.trace_add("write", self.update_options_ui)
         self.update_options_ui() 
 
-        # 拖曳區 - 高度縮小
-        self.drop_frame = ctk.CTkFrame(self.root, fg_color="#f9f9f9", border_width=2, border_color="#3a7ebf", corner_radius=10, height=50)
-        self.drop_frame.pack(fill="x", padx=10, pady=5)
+        # ---------------------------------------------------------
+        # 【修正 1】拖曳區 - 改為自動放大填補紅色空缺 (expand=True)
+        # ---------------------------------------------------------
+        self.drop_frame = ctk.CTkFrame(self.root, fg_color="#f9f9f9", border_width=2, border_color="#3a7ebf", corner_radius=10)
+        self.drop_frame.pack(fill="both", expand=True, padx=10, pady=5)
         self.drop_frame.pack_propagate(False)
-        self.status_label = ctk.CTkLabel(self.drop_frame, text="📁 將檔案拖曳至此 或 點擊選擇檔案", font=("Microsoft JhengHei", 13, "bold"), text_color="#555")
+        self.status_label = ctk.CTkLabel(self.drop_frame, text="📁 將檔案拖曳至此 或 點擊選擇檔案", font=("Microsoft JhengHei", 18, "bold"), text_color="#555")
         self.status_label.pack(expand=True)
         self.drop_frame.bind("<Button-1>", lambda e: self.browse_file()); self.status_label.bind("<Button-1>", lambda e: self.browse_file())
         self.root.drop_target_register(DND_FILES); self.root.dnd_bind('<<Drop>>', self.on_drop)
@@ -220,9 +220,11 @@ class PDFToolApp:
         self.cancel_btn = ctk.CTkButton(action_frame, text="取消任務", fg_color="#cc3333", hover_color="#aa2222", state="disabled", command=self.cancel_task, width=70, height=26)
         self.cancel_btn.pack(side="right")
 
-        # 日誌終端區 (Console) - 高度縮小
+        # ---------------------------------------------------------
+        # 【修正 2】日誌終端區 - 拿掉 expand=True，確保它固定在底部不會亂長大
+        # ---------------------------------------------------------
         self.log_box = ctk.CTkTextbox(self.root, height=80, font=("Consolas", 11), state="disabled", fg_color="#1e1e1e", text_color="#00ff00")
-        self.log_box.pack(fill="both", expand=True, padx=10, pady=(5, 10))
+        self.log_box.pack(fill="x", padx=10, pady=(5, 10))
         self.write_log("✅ 系統初始化完成，等待任務輸入...")
 
     def toggle_theme(self):
@@ -237,7 +239,8 @@ class PDFToolApp:
         self.log_box.insert("end", f"[{time_str}] {text}\n")
         self.log_box.see("end")
         self.log_box.configure(state="disabled")
-        self.status_label.configure(text=text)
+        # 【修正 3】把這行拿掉，讓「拖曳區」的大字不會被日誌小字洗掉，保持介面美觀
+        # self.status_label.configure(text=text)
 
     def update_options_ui(self, *args):
         for widget in self.opt_frame.winfo_children(): widget.pack_forget()
