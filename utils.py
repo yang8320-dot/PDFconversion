@@ -5,15 +5,19 @@ import subprocess
 from PIL import ImageDraw
 
 def get_base_path():
+    """判斷是否為 PyInstaller 打包環境，動態修正根目錄路徑"""
     if getattr(sys, 'frozen', False):
+        # 執行檔運行時的暫存解壓縮目錄
         return sys._MEIPASS
     else:
+        # 開發環境目錄
         return os.path.abspath(".")
 
 def get_poppler_path():
     return os.path.join(get_base_path(), "Library", "poppler_bin")
 
 def get_model_path():
+    """取得所有 ONNX 模型的共用目錄"""
     return os.path.join(get_base_path(), "Library", "models")
 
 def check_poppler_exists():
