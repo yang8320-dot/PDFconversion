@@ -5,6 +5,72 @@ import cv2
 import numpy as np
 from utils import get_poppler_path, apply_watermark_removal, format_size, get_model_path
 
+# --- 新增辦公室神級功能 (Word/Excel/裁切/塗黑遮蔽) ---
+
+def process_pdf_to_word(input_file, output_path, status_callback, stop_event):
+    from pdf2docx import Converter
+    status_callback("📝 啟動引擎，正在轉換 PDF 為 Word...", 0.5)
+    cv = Converter(input_file)
+    cv.convert(output_path, start=0, end=None)
+    cv.close()
+
+def process_pdf_to_excel(input_file, output_path, status_callback, stop_event):
+    import pdfplumber
+    import pandas as pd
+    status_callback("📊 正在提取表格資料...", 0.2)
+    all_tables = []
+    with pdfplumber.open(input_file) as pdf:
+        total = len(pdf.pages)
+        for i, page in enumerate(pdf.pages):
+            if stop_event.is_set(): return
+            status_callback(f"📊 掃描第 {i+1} 頁表格...", (i+1)/total)
+            tables = page.extract_tables()
+            for table in tables:
+                if table and len(table) > 1:
+                    df = pd.DataFrame(table[1:], columns=table[0])
+                    all_tables.append(df)
+                    
+    if not all_tables: raise Exception("此 PDF 中找不到任何表格資料！")
+    
+    status_callback("💾 正在寫入 Excel...", 0.9)
+    with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+        for i, df in enumerate(all_tables):
+            df.to_excel(writer, sheet_name=f"Table_{i+1}", index=False)
+
+def process_redact_text(input_file, output_path, keyword, status_callback, stop_event):
+    import fitz
+    doc = fitz.open(input_file)
+    total = len(doc)
+    count = 0
+    for i, page in enumerate(doc):
+        if stop_event.is_set(): return
+        status_callback(f"⬛ 正在搜尋與塗黑第 {i+1} 頁...", (i+1)/total)
+        text_instances = page.search_for(keyword)
+        for inst in text_instances:
+            page.add_redact_annot(inst, fill=(0, 0, 0))
+            count += 1
+        page.apply_redactions()
+        
+    if count == 0:
+        doc.close()
+        raise Exception(f"找不到關鍵字 '{keyword}'，請確認 PDF 為可選取文字的格式。")
+        
+    status_callback("🔒 正在扁平化儲存確保無法復原...", 0.9)
+    doc.save(output_path, deflate=True)
+    doc.close()
+
+def process_crop_pdf(input_file, output_path, status_callback, stop_event):
+    import fitz
+    doc = fitz.open(input_file)
+    total = len(doc)
+    for i, page in enumerate(doc):
+        if stop_event.is_set(): return
+        status_callback(f"✂️ 正在裁切第 {i+1} 頁白邊...", (i+1)/total)
+        bbox = page.get_bbox() # 獲取實際有內容的邊界
+        page.set_cropbox(bbox)
+    doc.save(output_path, garbage=3, deflate=True)
+    doc.close()
+
 # --- 基礎合併與轉換 ---
 
 def process_merge_pdfs(input_files, output_path, status_callback, stop_event):
@@ -33,7 +99,7 @@ def process_merge_pdfs(input_files, output_path, status_callback, stop_event):
                     img_pdf = fitz.open("pdf", pdf_bytes)
                     temp_pdf = os.path.join(temp_dir, f"temp_{i}.pdf")
                     img_pdf.save(temp_pdf)
-                    img_pdf.close(); img_doc.close()
+                    img_pdf.close(); img_doc.close(); del img_doc; gc.collect()
                     merger.append(temp_pdf)
                 elif ext in ['docx', 'doc']:
                     from docx2pdf import convert
@@ -45,7 +111,7 @@ def process_merge_pdfs(input_files, output_path, status_callback, stop_event):
                         convert(file_path, temp_pdf)
                         merger.append(temp_pdf)
                     except Exception as e:
-                        raise Exception(f"Word 轉換失敗 ({base_name})\n1. 請確認電腦有安裝 Microsoft Word。\n2. 請確認沒有開啟對話框卡住 Word。\n錯誤細節: {e}")
+                        raise Exception(f"Word 轉換失敗 ({base_name})\n確認沒開啟 Word 對話框卡住。\n錯誤: {e}")
                     finally:
                         sys.stdout, sys.stderr = old_out, old_err
                 else:
@@ -70,6 +136,7 @@ def process_images_to_pdf(input_files, output_path, status_callback, stop_event)
         img_pdf = fitz.open("pdf", pdf_bytes)
         doc.insert_pdf(img_pdf)
         img_doc.close(); img_pdf.close()
+        del img_doc; gc.collect()
     doc.save(output_path)
     doc.close()
 
@@ -215,6 +282,7 @@ def process_to_grayscale(input_file, output_path, status_callback, stop_event, d
         pix = page.get_pixmap(dpi=dpi, colorspace=fitz.csGRAY)
         new_page = new_doc.new_page(width=page.rect.width, height=page.rect.height)
         new_page.insert_image(page.rect, pixmap=pix)
+        del pix; gc.collect()
     new_doc.save(output_path, garbage=4, deflate=True)
     doc.close(); new_doc.close()
 
@@ -225,11 +293,12 @@ def process_flatten_pdf(input_file, output_path, status_callback, stop_event, dp
     total = len(doc)
     for i in range(total):
         if stop_event.is_set(): return
-        status_callback(f"🥞 正在扁平化 PDF 防止篡改 ({i+1}/{total})...", (i+1)/total)
+        status_callback(f"🥞 正在扁平化 PDF ({i+1}/{total})...", (i+1)/total)
         page = doc[i]
         pix = page.get_pixmap(dpi=dpi)
         new_page = new_doc.new_page(width=page.rect.width, height=page.rect.height)
         new_page.insert_image(page.rect, pixmap=pix)
+        del pix; gc.collect()
     new_doc.save(output_path, garbage=4, deflate=True)
     doc.close(); new_doc.close()
 
@@ -276,7 +345,7 @@ def process_compress_pdf(input_file, output_path, status_callback, stop_event):
     new_size = os.path.getsize(output_path)
     return f"壓縮完成！\n原大小: {format_size(orig_size)} ➡️ 新大小: {format_size(new_size)}"
 
-# --- 浮水印處理 ---
+# --- 浮水印與印章處理 ---
 
 def process_add_watermark(input_file, output_path, text, status_callback, stop_event):
     import fitz
@@ -284,30 +353,42 @@ def process_add_watermark(input_file, output_path, text, status_callback, stop_e
     total = len(doc)
     for i, page in enumerate(doc):
         if stop_event.is_set(): return
-        status_callback(f"🖋️ 正在加入浮水印... ({i+1}/{total})", (i+1)/total)
+        status_callback(f"🖋️ 正在加入文字浮水印... ({i+1}/{total})", (i+1)/total)
         rect = page.rect
         page.insert_text(fitz.Point(50, rect.height / 2), text, fontsize=48, color=(1, 0, 0))
     doc.save(output_path)
     doc.close()
 
-def process_add_image_watermark(input_file, output_path, img_path, position, status_callback, stop_event):
+def process_add_image_watermark(input_file, output_path, img_path, position, target_page="全部頁面", status_callback=None, stop_event=None):
     import fitz
     doc = fitz.open(input_file)
     total = len(doc)
     img_doc = fitz.open(img_path)
     img_rect = img_doc[0].rect
     img_doc.close()
-    for i, page in enumerate(doc):
-        if stop_event.is_set(): return
-        status_callback(f"🖼️ 正在壓印圖片浮水印... ({i+1}/{total})", (i+1)/total)
+    
+    target_indices = []
+    if target_page == "僅第一頁": target_indices = [0]
+    elif target_page == "僅最後一頁": target_indices = [total - 1]
+    else: target_indices = range(total)
+
+    for i in target_indices:
+        if stop_event and stop_event.is_set(): return
+        if status_callback: status_callback(f"🖼️ 正在壓印圖片... (第 {i+1} 頁)", (i+1)/total)
+        
+        page = doc[i]
         page_rect = page.rect
         w = page_rect.width * 0.25
         h = w * (img_rect.height / img_rect.width)
+        
         if position == "右下角": target_rect = fitz.Rect(page_rect.width - w - 20, page_rect.height - h - 20, page_rect.width - 20, page_rect.height - 20)
         elif position == "左下角": target_rect = fitz.Rect(20, page_rect.height - h - 20, 20 + w, page_rect.height - 20)
         elif position == "右上角": target_rect = fitz.Rect(page_rect.width - w - 20, 20, page_rect.width - 20, 20 + h)
+        elif position == "正中央": target_rect = fitz.Rect(page_rect.width/2 - w/2, page_rect.height/2 - h/2, page_rect.width/2 + w/2, page_rect.height/2 + h/2)
         else: target_rect = fitz.Rect(20, 20, 20 + w, 20 + h)
+        
         page.insert_image(target_rect, filename=img_path)
+    
     doc.save(output_path)
     doc.close()
 
@@ -352,7 +433,7 @@ def process_remove_watermark(input_file, output_path, status_callback, stop_even
                 pdf_bytes = img_doc.convert_to_pdf()
                 img_pdf = fitz.open("pdf", pdf_bytes)
                 doc.insert_pdf(img_pdf)
-                img_doc.close(); img_pdf.close()
+                img_doc.close(); img_pdf.close(); del img_doc; gc.collect()
             doc.save(output_path)
             doc.close()
 
@@ -385,7 +466,6 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
     import cv2
     import numpy as np
     
-    # 強制繁化
     converter = opencc.OpenCC('s2twp')
 
     is_pdf = input_file.lower().endswith('.pdf')
@@ -445,7 +525,6 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
                             run.font.size = Pt(10)
                             run.font.color.rgb = RGBColor(0, 0, 0)
 
-    # 動態路徑載入模型
     ocr_engine, layout_engine, table_engine = None, None, None
     if ppt_mode == "圖文排版 (智慧 OCR)":
         from rapidocr_onnxruntime import RapidOCR
@@ -476,12 +555,9 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
             text_boxes_data = []
             table_html_data = []
             
-            # 解決 Windows 中文路徑報錯
             hr_img = cv2.imdecode(np.fromfile(hr_img_path, dtype=np.uint8), cv2.IMREAD_COLOR)
-            if hr_img is None:
-                return 
+            if hr_img is None: return 
 
-            # AI 視覺預處理模組 (提升辨識率)
             def enhance_for_ocr(image):
                 try:
                     gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -607,8 +683,7 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
                     slide.shapes.add_picture(normal_path, 0, 0, prs.slide_width, prs.slide_height)
                     continue
                 
-                status_callback(f"👁️ 進行版面分析與雙軌重建 (第 {i+1} / {total} 頁)...", (i+1)/total)
-                
+                status_callback(f"👁️ 版面分析與雙軌重建 (第 {i+1} / {total} 頁)...", (i+1)/total)
                 mat = fitz.Matrix(4.0, 4.0)
                 hr_path = os.path.join(temp_dir, f"hr_{i}.jpg")
                 page.get_pixmap(matrix=mat, colorspace=fitz.csRGB).save(hr_path)
@@ -637,7 +712,7 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
                 process_slide(hr_path, normal_path, slide, scale_down=1.0/4.0)
 
         if not stop_event.is_set():
-            status_callback("💾 正在儲存檔案...", 0.95)
+            status_callback("💾 正在儲存 PPT 檔案...", 0.95)
             prs.save(output_path)
 
 # --- 圖片進階處理 (OCR & 文字抹除) ---
@@ -648,12 +723,9 @@ def process_image_ocr(input_file, output_path, status_callback, stop_event):
     import cv2
     import numpy as np
     
-    converter = opencc.OpenCC('s2twp')  # 轉換為繁體中文
-    
-    # 支援讀取包含中文路徑的圖片
+    converter = opencc.OpenCC('s2twp')  
     img = cv2.imdecode(np.fromfile(input_file, dtype=np.uint8), cv2.IMREAD_COLOR)
-    if img is None:
-        raise Exception("無法讀取圖片，請確認檔案是否損壞。")
+    if img is None: raise Exception("無法讀取圖片，請確認檔案是否損壞。")
 
     status_callback("👁️ 正在進行 AI 視覺文字辨識...", 0.4)
     ocr_engine = RapidOCR()
@@ -667,11 +739,8 @@ def process_image_ocr(input_file, output_path, status_callback, stop_event):
             text = converter.convert(line[1])
             extracted_text.append(text)
 
-    with open(output_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(extracted_text))
-        
-    if not result:
-        raise Exception("找不到任何文字！")
+    with open(output_path, "w", encoding="utf-8") as f: f.write("\n".join(extracted_text))
+    if not result: raise Exception("找不到任何文字！")
 
 def process_image_remove_text(input_file, output_path, status_callback, stop_event):
     from rapidocr_onnxruntime import RapidOCR
@@ -680,13 +749,10 @@ def process_image_remove_text(input_file, output_path, status_callback, stop_eve
 
     status_callback("👁️ 正在掃描並定位圖片中的文字...", 0.3)
     img = cv2.imdecode(np.fromfile(input_file, dtype=np.uint8), cv2.IMREAD_COLOR)
-    if img is None:
-        raise Exception("無法讀取圖片，請確認檔案是否損壞。")
+    if img is None: raise Exception("無法讀取圖片，請確認檔案是否損壞。")
 
     ocr_engine = RapidOCR()
     result, _ = ocr_engine(img)
-    
-    # 建立純黑遮罩
     mask = np.zeros(img.shape[:2], dtype=np.uint8)
 
     if result:
@@ -694,26 +760,17 @@ def process_image_remove_text(input_file, output_path, status_callback, stop_eve
         for line in result:
             if stop_event.is_set(): return
             box = line[0]
-            # 將浮點數座標轉為整數座標矩陣
             pts = np.array(box, np.int32).reshape((-1, 1, 2))
-            # 在遮罩上畫出白色多邊形 (標示文字範圍)
             cv2.fillPoly(mask, [pts], 255)
 
-        # 稍微膨脹遮罩，確保文字邊緣被完全覆蓋
         kernel = np.ones((5, 5), np.uint8)
         mask = cv2.dilate(mask, kernel, iterations=2)
-
-        # 使用 Telea 演算法進行影像修補 (Inpainting)
         inpainted_img = cv2.inpaint(img, mask, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
     else:
-        # 如果沒發現文字，直接輸出原圖
         inpainted_img = img 
 
     status_callback("💾 正在儲存無文字圖片...", 0.9)
-    # 支援存入包含中文路徑的資料夾
     ext = os.path.splitext(output_path)[1]
     is_success, im_buf_arr = cv2.imencode(ext, inpainted_img)
-    if is_success:
-        im_buf_arr.tofile(output_path)
-    else:
-        raise Exception("儲存圖片失敗！")
+    if is_success: im_buf_arr.tofile(output_path)
+    else: raise Exception("儲存圖片失敗！")
