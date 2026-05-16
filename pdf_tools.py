@@ -639,3 +639,81 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
         if not stop_event.is_set():
             status_callback("💾 正在儲存檔案...", 0.95)
             prs.save(output_path)
+
+# --- 圖片進階處理 (OCR & 文字抹除) ---
+
+def process_image_ocr(input_file, output_path, status_callback, stop_event):
+    from rapidocr_onnxruntime import RapidOCR
+    import opencc
+    import cv2
+    import numpy as np
+    
+    converter = opencc.OpenCC('s2twp')  # 轉換為繁體中文
+    
+    # 支援讀取包含中文路徑的圖片
+    img = cv2.imdecode(np.fromfile(input_file, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if img is None:
+        raise Exception("無法讀取圖片，請確認檔案是否損壞。")
+
+    status_callback("👁️ 正在進行 AI 視覺文字辨識...", 0.4)
+    ocr_engine = RapidOCR()
+    result, _ = ocr_engine(img)
+    
+    extracted_text = []
+    if result:
+        status_callback("📝 正在整理與繁化文字...", 0.8)
+        for line in result:
+            if stop_event.is_set(): return
+            text = converter.convert(line[1])
+            extracted_text.append(text)
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(extracted_text))
+        
+    if not result:
+        raise Exception("找不到任何文字！")
+
+def process_image_remove_text(input_file, output_path, status_callback, stop_event):
+    from rapidocr_onnxruntime import RapidOCR
+    import cv2
+    import numpy as np
+
+    status_callback("👁️ 正在掃描並定位圖片中的文字...", 0.3)
+    img = cv2.imdecode(np.fromfile(input_file, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if img is None:
+        raise Exception("無法讀取圖片，請確認檔案是否損壞。")
+
+    ocr_engine = RapidOCR()
+    result, _ = ocr_engine(img)
+    
+    # 建立純黑遮罩
+    mask = np.zeros(img.shape[:2], dtype=np.uint8)
+
+    if result:
+        status_callback("🖌️ 正在運算遮罩與修補背景...", 0.6)
+        for line in result:
+            if stop_event.is_set(): return
+            box = line[0]
+            # 將浮點數座標轉為整數座標矩陣
+            pts = np.array(box, np.int32).reshape((-1, 1, 2))
+            # 在遮罩上畫出白色多邊形 (標示文字範圍)
+            cv2.fillPoly(mask, [pts], 255)
+
+        # 稍微膨脹遮罩，確保文字邊緣被完全覆蓋
+        kernel = np.ones((5, 5), np.uint8)
+        mask = cv2.dilate(mask, kernel, iterations=2)
+
+        # 使用 Telea 演算法進行影像修補 (Inpainting)
+        inpainted_img = cv2.inpaint(img, mask, inpaintRadius=5, flags=cv2.INPAINT_TELEA)
+    else:
+        # 如果沒發現文字，直接輸出原圖
+        inpainted_img = img 
+
+    status_callback("💾 正在儲存無文字圖片...", 0.9)
+    # 支援存入包含中文路徑的資料夾
+    ext = os.path.splitext(output_path)[1]
+    is_success, im_buf_arr = cv2.imencode(ext, inpainted_img)
+    if is_success:
+        im_buf_arr.tofile(output_path)
+    else:
+        raise Exception("儲存圖片失敗！")
