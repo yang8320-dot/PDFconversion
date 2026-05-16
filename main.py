@@ -160,7 +160,9 @@ class PDFToolApp:
         self.quality_var = ctk.StringVar(value="原畫質 (300 DPI)")
         self.wm_pos_var = ctk.StringVar(value="右下角")
         self.rotate_var = ctk.StringVar(value="90度")
-        self.ppt_mode_var = ctk.StringVar(value="圖文排版 (智慧 OCR)")
+        
+        # ★ 將預設選項改為「純圖片簡報 (較快)」
+        self.ppt_mode_var = ctk.StringVar(value="純圖片簡報 (較快)")
 
         self.lbl_dpi = ctk.CTkLabel(self.opt_frame, text="⚙️ 畫質:", font=("Microsoft JhengHei", 12, "bold"))
         self.menu_dpi = ctk.CTkOptionMenu(self.opt_frame, variable=self.quality_var, values=["原畫質 (300 DPI)", "高畫質 (200 DPI)", "中畫質 (150 DPI)", "低畫質 (72 DPI)"], width=130)
