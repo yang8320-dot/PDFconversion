@@ -9,4 +9,7 @@ pillow
 docx2pdf
 pywin32
 rapidocr_onnxruntime
+rapid-layout
+rapid-table
 opencc-python-reimplemented
+beautifulsoup4
