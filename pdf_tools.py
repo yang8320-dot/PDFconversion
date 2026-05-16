@@ -380,8 +380,8 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
     from collections import Counter
     import opencc 
     
-    # 建立轉換器：簡體轉台灣繁體
-    converter = opencc.OpenCC('s2twp.json')
+    # 【修正】：移除 .json，避免 OpenCC 自動加上附檔名導致找不到檔案
+    converter = opencc.OpenCC('s2twp')
 
     is_pdf = input_file.lower().endswith('.pdf')
     prs = Presentation()
