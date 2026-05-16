@@ -142,9 +142,7 @@ class PDFToolApp:
         self.theme_switch = ctk.CTkSwitch(top_frame, text="深色模式", command=self.toggle_theme, font=("Microsoft JhengHei", 11), width=50)
         self.theme_switch.pack(side="right", padx=5)
 
-        # ---------------------------------------------------------
-        # 【修正核心 1】強制限制標籤頁高度為 140，剛好包覆兩排按鈕
-        # ---------------------------------------------------------
+        # 核心：標籤頁設計 (強制高度 140)
         self.tabview = ctk.CTkTabview(self.root, height=140)
         self.tabview.pack(fill="x", padx=10, pady=2)
         
@@ -199,9 +197,7 @@ class PDFToolApp:
         self.menu_rm_mode.configure(command=self.update_options_ui)
         self.mode_var.trace_add("write", self.update_options_ui)
 
-        # ---------------------------------------------------------
-        # 拖曳區保持 Expand=True，吸收掉畫面中所有的空白區域
-        # ---------------------------------------------------------
+        # 拖曳區 
         self.drop_frame = ctk.CTkFrame(self.root, fg_color="#f9f9f9", border_width=2, border_color="#3a7ebf", corner_radius=10)
         self.drop_frame.pack(fill="both", expand=True, padx=10, pady=5)
         self.drop_frame.pack_propagate(False)
@@ -464,4 +460,19 @@ class PDFToolApp:
                 msg = result_msg if result_msg else "✅ 任務完成！"
                 self.update_status(msg, 1.0)
                 self.root.after(0, lambda: messagebox.showinfo("成功", msg))
-                open_file_or_folder(output_data
+                open_file_or_folder(output_data)
+            else:
+                self.update_status("⚠️ 任務已取消", 0)
+
+        except Exception as e:
+            self.update_status(f"❌ 錯誤: {str(e)}", 0)
+            self.root.after(0, lambda: messagebox.showerror("錯誤", f"處理過程中發生錯誤：\n{str(e)}"))
+        finally:
+            self.root.after(0, lambda: self.set_ui_state("normal"))
+
+if __name__ == "__main__":
+    check_single_instance()
+    set_dpi_awareness()
+    root = CTkinterDnD()
+    app = PDFToolApp(root)
+    root.mainloop()
