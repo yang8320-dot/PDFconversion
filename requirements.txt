@@ -13,3 +13,4 @@ rapid-layout
 rapid-table
 opencc-python-reimplemented
 beautifulsoup4
+opencv-python
