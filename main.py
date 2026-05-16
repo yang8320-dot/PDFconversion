@@ -1,5 +1,13 @@
 import sys
 import os
+
+# 【終極防護】強制將 PyInstaller 的暫存目錄與執行檔目錄加入系統路徑，解決找不到模組的問題
+if getattr(sys, 'frozen', False):
+    sys.path.insert(0, sys._MEIPASS)
+    sys.path.insert(0, os.path.dirname(sys.executable))
+else:
+    sys.path.insert(0, os.path.abspath("."))
+
 import ctypes
 import threading
 import tkinter as tk
