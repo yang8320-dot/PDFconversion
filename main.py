@@ -443,4 +443,27 @@ class PDFToolApp:
                         if self.stop_event.is_set(): break
                         base = os.path.splitext(os.path.basename(file))[0]
                         self.update_status(f"🔄 批次處理中 ({idx+1}/{len(files)}): {base}", idx/len(files))
-                        process_pd
+                        process_pdf_to_ppt(file, os.path.join(output_data, f"{base}.pptx"), dpi=extra["dpi"], ppt_mode=extra["ppt_mode"], **kwargs)
+                else:
+                    process_pdf_to_ppt(input_data[0], output_data, dpi=extra["dpi"], ppt_mode=extra["ppt_mode"], **kwargs)
+
+            if not self.stop_event.is_set():
+                msg = result_msg if result_msg else "✅ 任務完成！"
+                self.update_status(msg, 1.0)
+                self.root.after(0, lambda: messagebox.showinfo("成功", msg))
+                open_file_or_folder(output_data)
+            else:
+                self.update_status("⚠️ 任務已取消", 0)
+
+        except Exception as e:
+            self.update_status(f"❌ 錯誤: {str(e)}", 0)
+            self.root.after(0, lambda: messagebox.showerror("錯誤", f"處理過程中發生錯誤：\n{str(e)}"))
+        finally:
+            self.root.after(0, lambda: self.set_ui_state("normal"))
+
+if __name__ == "__main__":
+    check_single_instance()
+    set_dpi_awareness()
+    root = CTkinterDnD()
+    app = PDFToolApp(root)
+    root.mainloop()
