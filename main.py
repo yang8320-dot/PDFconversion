@@ -121,7 +121,7 @@ class PDFToolApp:
         self.root = root
         self.root.title("PDF 辦公室全能工具箱 PRO")
         self.root.geometry("720x540") 
-        self.root.resizable(False, False) # 固定視窗大小避免跑版
+        self.root.resizable(False, False) 
         ctk.set_appearance_mode("light")  
         ctk.set_default_color_theme("blue")  
 
@@ -142,7 +142,7 @@ class PDFToolApp:
         self.theme_switch = ctk.CTkSwitch(top_frame, text="深色模式", command=self.toggle_theme, font=("Microsoft JhengHei", 11), width=50)
         self.theme_switch.pack(side="right", padx=5)
 
-        # 核心：標籤頁設計 (TabView) - 縮小高度
+        # 核心：標籤頁設計 
         self.tabview = ctk.CTkTabview(self.root, height=120)
         self.tabview.pack(fill="x", padx=10, pady=2)
         
@@ -179,7 +179,6 @@ class PDFToolApp:
         self.rotate_var = ctk.StringVar(value="90度")
         self.ppt_mode_var = ctk.StringVar(value="純圖片簡報 (較快)")
 
-        # 選項元件
         self.lbl_ext_mode = ctk.CTkLabel(self.opt_frame, text="📄 來源選項:", font=("Microsoft JhengHei", 11, "bold"))
         self.menu_ext_mode = ctk.CTkOptionMenu(self.opt_frame, variable=self.extract_mode_var, values=["PDF 原生文字提取", "圖片 AI OCR 辨識"], width=140, height=24)
         self.lbl_rm_mode = ctk.CTkLabel(self.opt_frame, text="🧹 抹除模式:", font=("Microsoft JhengHei", 11, "bold"))
@@ -195,15 +194,11 @@ class PDFToolApp:
         self.lbl_ppt = ctk.CTkLabel(self.opt_frame, text="📄 模式:", font=("Microsoft JhengHei", 11, "bold"))
         self.menu_ppt = ctk.CTkOptionMenu(self.opt_frame, variable=self.ppt_mode_var, values=["圖文排版 (智慧 OCR)", "純圖片簡報 (較快)"], width=140, height=24)
         
-        # 綁定事件：當選單內容改變時，觸發 update_options_ui
         self.menu_ext_mode.configure(command=self.update_options_ui)
         self.menu_rm_mode.configure(command=self.update_options_ui)
         self.mode_var.trace_add("write", self.update_options_ui)
-        self.update_options_ui() 
 
-        # ---------------------------------------------------------
-        # 【修正 1】拖曳區 - 改為自動放大填補紅色空缺 (expand=True)
-        # ---------------------------------------------------------
+        # 拖曳區 
         self.drop_frame = ctk.CTkFrame(self.root, fg_color="#f9f9f9", border_width=2, border_color="#3a7ebf", corner_radius=10)
         self.drop_frame.pack(fill="both", expand=True, padx=10, pady=5)
         self.drop_frame.pack_propagate(False)
@@ -220,12 +215,16 @@ class PDFToolApp:
         self.cancel_btn = ctk.CTkButton(action_frame, text="取消任務", fg_color="#cc3333", hover_color="#aa2222", state="disabled", command=self.cancel_task, width=70, height=26)
         self.cancel_btn.pack(side="right")
 
-        # ---------------------------------------------------------
-        # 【修正 2】日誌終端區 - 拿掉 expand=True，確保它固定在底部不會亂長大
-        # ---------------------------------------------------------
+        # 日誌終端區 
         self.log_box = ctk.CTkTextbox(self.root, height=80, font=("Consolas", 11), state="disabled", fg_color="#1e1e1e", text_color="#00ff00")
         self.log_box.pack(fill="x", padx=10, pady=(5, 10))
         self.write_log("✅ 系統初始化完成，等待任務輸入...")
+
+        # =========================================================
+        # 【修正核心】將畫面初始化的計算移到最後，並強制更新視窗尺寸
+        # =========================================================
+        self.update_options_ui()
+        self.root.update_idletasks()
 
     def toggle_theme(self):
         mode = "dark" if self.theme_switch.get() == 1 else "light"
@@ -239,8 +238,6 @@ class PDFToolApp:
         self.log_box.insert("end", f"[{time_str}] {text}\n")
         self.log_box.see("end")
         self.log_box.configure(state="disabled")
-        # 【修正 3】把這行拿掉，讓「拖曳區」的大字不會被日誌小字洗掉，保持介面美觀
-        # self.status_label.configure(text=text)
 
     def update_options_ui(self, *args):
         for widget in self.opt_frame.winfo_children(): widget.pack_forget()
@@ -300,7 +297,7 @@ class PDFToolApp:
 
         if mode != "UNLOCK" and first_file.lower().endswith(".pdf"):
             if check_is_encrypted(first_file):
-                return messagebox.showwarning("檔案已加密", "⚠️ 此 PDF 受到密碼保護！請先使用「解鎖 PDF」功能。")
+                return messagebox.showwarning("檔案已加密", "⚠️ 此 PDF 受到密保護！請先使用「解鎖 PDF」功能。")
 
         if mode in ["MERGE", "IMG2PDF"]: 
             return ListManagerWindow(self, valid_files, mode, lambda sf: self.trigger_list_process(mode, sf, first_file_name))
