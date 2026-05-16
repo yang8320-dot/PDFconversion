@@ -20,7 +20,8 @@ from pdf_tools import (process_merge_pdfs, process_protect_pdf, process_split_pd
                        process_images_to_pdf, process_unlock_pdf, process_rotate_pdf, process_add_watermark,
                        process_remove_pages, process_to_grayscale, process_extract_text, process_insert_blank_page,
                        process_add_page_numbers, process_reorder_pages, process_extract_original_images,
-                       process_flatten_pdf, process_add_image_watermark)
+                       process_flatten_pdf, process_add_image_watermark,
+                       process_image_ocr, process_image_remove_text)
 
 from utils import check_poppler_exists, open_file_or_folder, get_base_path
 
@@ -126,6 +127,7 @@ class PDFToolApp:
     def __init__(self, root):
         self.root = root
         self.root.title("PDF 辦公室全能工具箱")
+        # 維持原本清爽的視窗高度
         self.root.geometry("900x370") 
         ctk.set_appearance_mode("light")  
         ctk.set_default_color_theme("blue")  
@@ -144,10 +146,11 @@ class PDFToolApp:
         mode_frame.pack(fill="x", padx=15, pady=(10, 5))
         for i in range(5): mode_frame.grid_columnconfigure(i, weight=1, uniform="col_group")
         
-        modes1 = [("PDF 轉 PPT", "PPT"), ("PDF 轉圖片", "PDF2IMG"), ("圖片轉 PDF", "IMG2PDF"), ("提取純文字", "EXTRACT_TXT"), ("提取內嵌圖", "EXTRACT_IMGS")]
+        # 修改名稱以涵蓋合併的功能
+        modes1 = [("PDF 轉 PPT", "PPT"), ("PDF 轉圖片", "PDF2IMG"), ("圖片轉 PDF", "IMG2PDF"), ("提取文字/OCR", "EXTRACT_TXT"), ("提取內嵌圖", "EXTRACT_IMGS")]
         modes2 = [("提取/分割 PDF", "SPLIT"), ("刪除指定頁", "REMOVE_PAGES"), ("插入空白頁", "INSERT_BLANK"), ("重新排序頁", "REORDER"), ("萬能合併(含Word)", "MERGE")]
         modes3 = [("轉黑白/灰階", "GRAYSCALE"), ("扁平化(防篡改)", "FLATTEN"), ("PDF 壓縮", "COMPRESS"), ("PDF 旋轉", "ROTATE"), ("添加頁碼", "ADD_PAGE_NUM")]
-        modes4 = [("加密 PDF", "PROTECT"), ("解鎖 PDF", "UNLOCK"), ("加文字浮水印", "ADD_WM"), ("加圖片浮水印", "IMG_WM"), ("去浮水印", "RMWATERMARK")]
+        modes4 = [("加密 PDF", "PROTECT"), ("解鎖 PDF", "UNLOCK"), ("加文字浮水印", "ADD_WM"), ("加圖片浮水印", "IMG_WM"), ("浮水印/文字抹除", "RMWATERMARK")]
         
         for i, (text, val) in enumerate(modes1): ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 12)).grid(row=0, column=i, padx=2, pady=6, sticky="w")
         for i, (text, val) in enumerate(modes2): ctk.CTkRadioButton(mode_frame, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 12)).grid(row=1, column=i, padx=2, pady=6, sticky="w")
@@ -157,12 +160,23 @@ class PDFToolApp:
         self.opt_frame = ctk.CTkFrame(self.root, fg_color="#eef5fa", corner_radius=10)
         self.opt_frame.pack(fill="x", padx=15, pady=5)
         
+        # === 新增合併功能的子選項變數 ===
+        self.extract_mode_var = ctk.StringVar(value="PDF 原生文字提取")
+        self.rm_mode_var = ctk.StringVar(value="PDF 區域去浮水印")
+        
         self.quality_var = ctk.StringVar(value="原畫質 (300 DPI)")
         self.wm_pos_var = ctk.StringVar(value="右下角")
         self.rotate_var = ctk.StringVar(value="90度")
-        
-        # ★ 將預設選項改為「純圖片簡報 (較快)」
         self.ppt_mode_var = ctk.StringVar(value="純圖片簡報 (較快)")
+
+        # === 建立動態選單元件 ===
+        # 提取文字 子選單
+        self.lbl_ext_mode = ctk.CTkLabel(self.opt_frame, text="📄 來源選項:", font=("Microsoft JhengHei", 12, "bold"))
+        self.menu_ext_mode = ctk.CTkOptionMenu(self.opt_frame, variable=self.extract_mode_var, values=["PDF 原生文字提取", "圖片 AI OCR 辨識"], width=160, command=self.update_options_ui)
+        
+        # 抹除文字 子選單
+        self.lbl_rm_mode = ctk.CTkLabel(self.opt_frame, text="🧹 抹除模式:", font=("Microsoft JhengHei", 12, "bold"))
+        self.menu_rm_mode = ctk.CTkOptionMenu(self.opt_frame, variable=self.rm_mode_var, values=["PDF 區域去浮水印", "圖片 AI 智慧抹除文字"], width=170, command=self.update_options_ui)
 
         self.lbl_dpi = ctk.CTkLabel(self.opt_frame, text="⚙️ 畫質:", font=("Microsoft JhengHei", 12, "bold"))
         self.menu_dpi = ctk.CTkOptionMenu(self.opt_frame, variable=self.quality_var, values=["原畫質 (300 DPI)", "高畫質 (200 DPI)", "中畫質 (150 DPI)", "低畫質 (72 DPI)"], width=130)
@@ -197,11 +211,24 @@ class PDFToolApp:
     def update_options_ui(self, *args):
         for widget in self.opt_frame.winfo_children(): widget.pack_forget()
         mode = self.mode_var.get()
-        if mode in ["PPT", "PDF2IMG", "RMWATERMARK", "GRAYSCALE", "FLATTEN"]:
+        
+        # 顯示合併功能的下拉選單
+        if mode == "EXTRACT_TXT":
+            self.lbl_ext_mode.pack(side="left", padx=(10, 5), pady=5); self.menu_ext_mode.pack(side="left", padx=(0, 15))
+        
+        if mode == "RMWATERMARK":
+            self.lbl_rm_mode.pack(side="left", padx=(10, 5), pady=5); self.menu_rm_mode.pack(side="left", padx=(0, 15))
+            # 只有選擇 PDF 去浮水印時，才顯示 DPI 與位置選單
+            if self.rm_mode_var.get() == "PDF 區域去浮水印":
+                self.lbl_dpi.pack(side="left", padx=(10, 5), pady=5); self.menu_dpi.pack(side="left", padx=(0, 15))
+                self.lbl_wm.pack(side="left", padx=(5, 5), pady=5); self.menu_wm.pack(side="left", padx=(0, 15))
+        
+        # 其他通用選項顯示邏輯
+        if mode in ["PPT", "PDF2IMG", "GRAYSCALE", "FLATTEN"]:
             self.lbl_dpi.pack(side="left", padx=(10, 5), pady=5); self.menu_dpi.pack(side="left", padx=(0, 15))
         if mode == "PPT":
             self.lbl_ppt_mode.pack(side="left", padx=(10, 5), pady=5); self.menu_ppt_mode.pack(side="left", padx=(0, 15))
-        if mode in ["RMWATERMARK", "IMG_WM"]:
+        if mode == "IMG_WM":
             self.lbl_wm.pack(side="left", padx=(5, 5), pady=5); self.menu_wm.pack(side="left", padx=(0, 15))
         if mode == "ROTATE":
             self.lbl_rot.pack(side="left", padx=(10, 5), pady=5); self.menu_rot.pack(side="left", padx=(0, 15))
@@ -216,14 +243,24 @@ class PDFToolApp:
 
     def browse_file(self):
         mode = self.mode_var.get()
-        if mode in ["PPT", "PDF2IMG", "RMWATERMARK"]:
+        
+        # 根據不同的子選項模式，動態過濾對話框的副檔名
+        if mode == "EXTRACT_TXT":
+            if self.extract_mode_var.get() == "PDF 原生文字提取": file_paths = filedialog.askopenfilenames(title="選擇檔案", filetypes=[("PDF Files", "*.pdf")])
+            else: file_paths = filedialog.askopenfilenames(title="選擇圖片", filetypes=[("Images", "*.jpg;*.jpeg;*.png")])
+            
+        elif mode == "RMWATERMARK":
+            if self.rm_mode_var.get() == "PDF 區域去浮水印": file_paths = filedialog.askopenfilenames(title="選擇檔案", filetypes=[("PDF/Images", "*.pdf;*.jpg;*.png")])
+            else: file_paths = filedialog.askopenfilenames(title="選擇圖片", filetypes=[("Images", "*.jpg;*.jpeg;*.png")])
+            
+        elif mode in ["PPT", "PDF2IMG"]:
             file_paths = filedialog.askopenfilenames(title="選擇檔案", filetypes=[("PDF/Images", "*.pdf;*.jpg;*.png")])
         elif mode == "IMG2PDF":
-            file_paths = filedialog.askopenfilenames(title="選擇檔案", filetypes=[("Images", "*.jpg;*.jpeg;*.png")])
+            file_paths = filedialog.askopenfilenames(title="選擇圖片", filetypes=[("Images", "*.jpg;*.jpeg;*.png")])
         elif mode == "MERGE":
             file_paths = filedialog.askopenfilenames(title="選擇檔案", filetypes=[("支援的檔案 (PDF/圖/Word)", "*.pdf;*.jpg;*.jpeg;*.png;*.docx;*.doc")])
         else: 
-            file_paths = filedialog.askopenfilenames(title="選擇檔案", filetypes=[("PDF Files", "*.pdf")])
+            file_paths = filedialog.askopenfilenames(title="選擇 PDF", filetypes=[("PDF Files", "*.pdf")])
             
         if file_paths: self.process_selected_files(file_paths)
 
@@ -275,7 +312,9 @@ class PDFToolApp:
             extra_args["ranges"] = ranges
             
         elif mode == "EXTRACT_TXT":
-            output_path = filedialog.asksaveasfilename(title="儲存純文字檔", initialfile=f"{first_file_name}.txt", defaultextension=".txt")
+            extra_args["extract_mode"] = self.extract_mode_var.get()
+            suffix = "_OCR" if extra_args["extract_mode"] == "圖片 AI OCR 辨識" else ""
+            output_path = filedialog.asksaveasfilename(title="儲存純文字檔", initialfile=f"{first_file_name}{suffix}.txt", defaultextension=".txt")
             
         elif mode == "EXTRACT_IMGS":
             output_path = filedialog.askdirectory(title="選擇圖片提取的儲存資料夾")
@@ -324,8 +363,12 @@ class PDFToolApp:
             output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_compressed.pdf", defaultextension=".pdf")
             
         elif mode == "RMWATERMARK": 
-            output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_clean", defaultextension=".pdf", filetypes=[("PDF", "*.pdf"), ("PPT", "*.pptx")])
-            extra_args["position"] = self.wm_pos_var.get()
+            extra_args["rm_mode"] = self.rm_mode_var.get()
+            if extra_args["rm_mode"] == "PDF 區域去浮水印":
+                output_path = filedialog.asksaveasfilename(title="儲存", initialfile=f"{first_file_name}_clean", defaultextension=".pdf", filetypes=[("PDF", "*.pdf"), ("PPT", "*.pptx")])
+                extra_args["position"] = self.wm_pos_var.get()
+            else:
+                output_path = filedialog.asksaveasfilename(title="儲存抹除後的圖片", initialfile=f"{first_file_name}_cleaned", defaultextension=".jpg", filetypes=[("JPEG", "*.jpg"), ("PNG", "*.png")])
             
         elif mode == "PPT":
             extra_args["ppt_mode"] = self.ppt_mode_var.get()
@@ -372,7 +415,12 @@ class PDFToolApp:
             elif mode == "REMOVE_PAGES": process_remove_pages(input_data[0], output_data, extra["ranges"], **kwargs)
             elif mode == "INSERT_BLANK": process_insert_blank_page(input_data[0], output_data, extra["ranges"], **kwargs)
             elif mode == "REORDER": process_reorder_pages(input_data[0], output_data, extra["ranges"], **kwargs)
-            elif mode == "EXTRACT_TXT": process_extract_text(input_data[0], output_data, **kwargs)
+            
+            # --- 合併功能分流 (提取文字) ---
+            elif mode == "EXTRACT_TXT":
+                if extra.get("extract_mode") == "圖片 AI OCR 辨識": process_image_ocr(input_data[0], output_data, **kwargs)
+                else: process_extract_text(input_data[0], output_data, **kwargs)
+                
             elif mode == "EXTRACT_IMGS": result_msg = process_extract_original_images(input_data[0], output_data, **kwargs)
             elif mode == "GRAYSCALE": process_to_grayscale(input_data[0], output_data, dpi=extra["dpi"], **kwargs)
             elif mode == "FLATTEN": process_flatten_pdf(input_data[0], output_data, dpi=extra["dpi"], **kwargs)
@@ -384,7 +432,12 @@ class PDFToolApp:
             elif mode == "ADD_PAGE_NUM": process_add_page_numbers(input_data[0], output_data, **kwargs)
             elif mode == "PDF2IMG": process_pdf_to_images(input_data[0], output_data, dpi=extra["dpi"], **kwargs)
             elif mode == "COMPRESS": result_msg = process_compress_pdf(input_data[0], output_data, **kwargs)
-            elif mode == "RMWATERMARK": process_remove_watermark(input_data[0], output_data, dpi=extra["dpi"], position=extra["position"], **kwargs)
+            
+            # --- 合併功能分流 (抹除浮水印) ---
+            elif mode == "RMWATERMARK":
+                if extra.get("rm_mode") == "圖片 AI 智慧抹除文字": process_image_remove_text(input_data[0], output_data, **kwargs)
+                else: process_remove_watermark(input_data[0], output_data, dpi=extra["dpi"], position=extra["position"], **kwargs)
+                
             elif mode == "PPT":
                 if input_data[0] == "BATCH_MODE":
                     files = input_data[1:]
