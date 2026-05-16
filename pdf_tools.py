@@ -391,7 +391,6 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
     blank_slide_layout = prs.slide_layouts[6] 
     
     def expand_bbox(x0, y0, x1, y1, scale=1.1, max_w=9999, max_h=9999):
-        """以中心點為基準向外擴張 BBox，確保蓋住文字毛邊"""
         cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
         w, h = (x1 - x0) * scale, (y1 - y0) * scale
         new_x0 = max(0, cx - w / 2)
@@ -416,12 +415,10 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
                 pixel = img_obj.getpixel((sx, sy))
                 if isinstance(pixel, int): pixel = (pixel, pixel, pixel)
                 samples.append(pixel[:3]) 
-            except:
-                pass
+            except: pass
         return Counter(samples).most_common(1)[0][0] if samples else (255, 255, 255)
 
     def draw_ppt_table_from_html(slide, html_str, x_pt, y_pt, w_pt, h_pt):
-        """解析 RapidTable 的 HTML 並利用 python-pptx 建立原生表格"""
         soup = BeautifulSoup(html_str, 'html.parser')
         rows = soup.find_all('tr')
         if not rows: return
@@ -446,7 +443,7 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
                             run.font.size = Pt(10)
                             run.font.color.rgb = RGBColor(0, 0, 0)
 
-    # 動態路徑綁定載入模型
+    # 動態路徑載入模型
     ocr_engine, layout_engine, table_engine = None, None, None
     if ppt_mode == "圖文排版 (智慧 OCR)":
         from rapidocr_onnxruntime import RapidOCR
@@ -471,36 +468,60 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
             table_engine = RapidTable()
 
     with tempfile.TemporaryDirectory() as temp_dir:
-        # 建立處理單張頁面/圖片的內部函式 (避免 PDF/圖片邏輯重複)
         def process_slide(hr_img_path, normal_img_path, slide_obj, scale_down):
             img_obj = Image.open(normal_img_path).convert("RGB")
             draw = ImageDraw.Draw(img_obj)
             text_boxes_data = []
             table_html_data = []
             
-            layout_res, _ = layout_engine(hr_img_path)
-            if layout_res:
-                for region in layout_res:
-                    box = region['bbox']
-                    label = region['label']
-                    x0, y0, x1, y1 = [v * scale_down for v in box]
+            # 安全獲取 Layout 分析結果 (兼容 tuple、list、dataclass)
+            raw_layout = layout_engine(hr_img_path)
+            regions = []
+            if isinstance(raw_layout, tuple): raw_layout = raw_layout[0]
+            
+            if isinstance(raw_layout, list):
+                for item in raw_layout:
+                    if isinstance(item, dict): regions.append((item.get('bbox'), item.get('label')))
+            elif hasattr(raw_layout, 'boxes') and hasattr(raw_layout, 'class_names'):
+                for box, label in zip(raw_layout.boxes, raw_layout.class_names):
+                    regions.append((box, label))
+
+            if regions:
+                for box, label in regions:
+                    if box is None or label is None: continue
+                    # 確保 box 是扁平的 [x0, y0, x1, y1]
+                    if len(box) == 4 and not isinstance(box[0], (list, tuple, np.ndarray)):
+                        bx0, by0, bx1, by1 = box
+                    else:
+                        xs = [p[0] for p in box]; ys = [p[1] for p in box]
+                        bx0, by0, bx1, by1 = min(xs), min(ys), max(xs), max(ys)
+                        
+                    x0, y0, x1, y1 = [v * scale_down for v in [bx0, by0, bx1, by1]]
                     
                     if label == 'table':
                         hr_img = cv2.imread(hr_img_path)
-                        table_crop = hr_img[int(box[1]):int(box[3]), int(box[0]):int(box[2])]
-                        if table_crop.size > 0:
-                            table_res, _ = table_engine(table_crop)
-                            if table_res:
-                                table_html_data.append({"html": table_res, "x": x0, "y": y0, "w": x1-x0, "h": y1-y0})
+                        table_crop = hr_img[int(by0):int(by1), int(bx0):int(bx1)]
+                        if table_crop is not None and table_crop.size > 0:
+                            raw_table = table_engine(table_crop)
+                            table_res = raw_table[0] if isinstance(raw_table, tuple) else raw_table
+                            
+                            html_str = None
+                            if isinstance(table_res, str): html_str = table_res
+                            elif isinstance(table_res, dict) and 'html' in table_res: html_str = table_res['html']
+                            elif hasattr(table_res, 'html'): html_str = table_res.html
+                            
+                            if html_str:
+                                table_html_data.append({"html": html_str, "x": x0, "y": y0, "w": x1-x0, "h": y1-y0})
                                 exp_px_bbox = expand_bbox(x0, y0, x1, y1, scale=1.02, max_w=img_obj.width, max_h=img_obj.height)
                                 bg_color = get_dynamic_bg_color(img_obj, exp_px_bbox)
                                 draw.rectangle(exp_px_bbox, fill=bg_color)
                                 
                     elif label in ['text', 'title', 'figure']:
                         hr_img = cv2.imread(hr_img_path)
-                        text_crop = hr_img[int(box[1]):int(box[3]), int(box[0]):int(box[2])]
-                        if text_crop.size > 0:
-                            ocr_res, _ = ocr_engine(text_crop)
+                        text_crop = hr_img[int(by0):int(by1), int(bx0):int(bx1)]
+                        if text_crop is not None and text_crop.size > 0:
+                            raw_ocr = ocr_engine(text_crop)
+                            ocr_res = raw_ocr[0] if isinstance(raw_ocr, tuple) else raw_ocr
                             if ocr_res:
                                 for line in ocr_res:
                                     line_box = line[0]
@@ -515,8 +536,9 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
                                     bg_color = get_dynamic_bg_color(img_obj, exp_px_bbox)
                                     draw.rectangle(exp_px_bbox, fill=bg_color)
             else:
-                # 若 Layout 分析失敗，則全圖直接 OCR
-                ocr_res, _ = ocr_engine(hr_img_path)
+                #  fallback 全圖 OCR
+                raw_ocr = ocr_engine(hr_img_path)
+                ocr_res = raw_ocr[0] if isinstance(raw_ocr, tuple) else raw_ocr
                 if ocr_res:
                     for line in ocr_res:
                         line_box = line[0]
@@ -549,7 +571,6 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
             for t_item in table_html_data:
                 draw_ppt_table_from_html(slide_obj, t_item["html"], t_item["x"], t_item["y"], t_item["w"], t_item["h"])
 
-        # 開始處理 PDF 檔案
         if is_pdf:
             doc = fitz.open(input_file)
             total = len(doc)
@@ -578,15 +599,12 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
                 
                 process_slide(hr_path, normal_path, slide, scale_down=1.0/4.0)
             doc.close()
-            
-        # 開始處理單一圖片檔案
         else:
             img = Image.open(input_file).convert('RGB')
             normal_path = os.path.join(temp_dir, "normal.jpg")
             hr_path = os.path.join(temp_dir, "hr.jpg")
             
             img.save(normal_path, "JPEG", quality=95)
-            # 單圖模式：為了配合極限畫質演算法，把原圖放大 4 倍當作高畫質輸入
             hr_img = img.resize((img.width * 4, img.height * 4), Image.LANCZOS)
             hr_img.save(hr_path, "JPEG", quality=100)
             
@@ -595,7 +613,3 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
             slide = prs.slides.add_slide(blank_slide_layout)
 
             if ppt_mode == "純圖片簡報 (較快)":
-                status_callback("🖼️ 正在處理圖片檔案...", 0.5)
-                slide.shapes.add_picture(normal_path, 0, 0, prs.slide_width, prs.slide_height)
-            else:
-                status_callback("👁️ 進行版面分析與雙軌重建...", 0.5)
