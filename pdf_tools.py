@@ -539,12 +539,13 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
         layout_path = os.path.join(model_dir, "layout_cdla_dataset.onnx")
         table_path = os.path.join(model_dir, "ch_ppstructure_mobile_v2.0_SLANet.onnx")
         
+        # PPT 版面分析使用較寬鬆的 OCR 設定，避免漏字
         if os.path.exists(det_path):
-            ocr_engine = RapidOCR(det_model_path=det_path, cls_model_path=cls_path, rec_model_path=rec_path, det_box_thresh=0.3)
+            ocr_engine = RapidOCR(det_model_path=det_path, cls_model_path=cls_path, rec_model_path=rec_path, use_angle_cls=True, det_box_thresh=0.2, text_score=0.2)
             layout_engine = RapidLayout(model_path=layout_path)
             table_engine = RapidTable(model_path=table_path)
         else:
-            ocr_engine = RapidOCR()
+            ocr_engine = RapidOCR(use_angle_cls=True, det_box_thresh=0.2, text_score=0.2)
             layout_engine = RapidLayout()
             table_engine = RapidTable()
 
@@ -560,12 +561,11 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
 
             def enhance_for_ocr(image):
                 try:
-                    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-                    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-                    enhanced = clahe.apply(gray)
-                    kernel = np.array([[0, -0.5, 0], [-0.5, 3, -0.5], [0, -0.5, 0]])
-                    sharpened = cv2.filter2D(enhanced, -1, kernel)
-                    return cv2.cvtColor(sharpened, cv2.COLOR_GRAY2BGR)
+                    # 改用 YUV 空間進行光線對比度補償，不破壞筆畫結構
+                    img_yuv = cv2.cvtColor(image, cv2.COLOR_BGR2YUV)
+                    clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
+                    img_yuv[:,:,0] = clahe.apply(img_yuv[:,:,0])
+                    return cv2.cvtColor(img_yuv, cv2.COLOR_YUV2BGR)
                 except:
                     return image 
 
@@ -715,7 +715,7 @@ def process_pdf_to_ppt(input_file, output_path, status_callback, stop_event, dpi
             status_callback("💾 正在儲存 PPT 檔案...", 0.95)
             prs.save(output_path)
 
-# --- 圖片進階處理 (OCR & 文字抹除) ---
+# --- 圖片進階處理 (智慧放大強化版 OCR & 文字抹除) ---
 
 def process_image_ocr(input_file, output_path, status_callback, stop_event):
     from rapidocr_onnxruntime import RapidOCR
@@ -727,8 +727,24 @@ def process_image_ocr(input_file, output_path, status_callback, stop_event):
     img = cv2.imdecode(np.fromfile(input_file, dtype=np.uint8), cv2.IMREAD_COLOR)
     if img is None: raise Exception("無法讀取圖片，請確認檔案是否損壞。")
 
+    status_callback("👁️ 正在進行影像強化與解析度放大...", 0.2)
+    
+    # 影像強化核心：放大與 YUV 對比度提升
+    h, w = img.shape[:2]
+    short_edge = min(h, w)
+    if short_edge < 1000: img = cv2.resize(img, None, fx=2.5, fy=2.5, interpolation=cv2.INTER_CUBIC)
+    elif short_edge < 2000: img = cv2.resize(img, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
+        
+    try:
+        img_yuv = cv2.cvtColor(img, cv2.COLOR_BGR2YUV)
+        clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
+        img_yuv[:,:,0] = clahe.apply(img_yuv[:,:,0])
+        img = cv2.cvtColor(img_yuv, cv2.COLOR_YUV2BGR)
+    except: pass
+
     status_callback("👁️ 正在進行 AI 視覺文字辨識...", 0.4)
-    ocr_engine = RapidOCR()
+    # 支援垂直與傾斜文字，閾值調低抓取模糊文字
+    ocr_engine = RapidOCR(use_angle_cls=True, det_box_thresh=0.2, text_score=0.2)
     result, _ = ocr_engine(img)
     
     extracted_text = []
@@ -740,7 +756,7 @@ def process_image_ocr(input_file, output_path, status_callback, stop_event):
             extracted_text.append(text)
 
     with open(output_path, "w", encoding="utf-8") as f: f.write("\n".join(extracted_text))
-    if not result: raise Exception("找不到任何文字！")
+    if not result: raise Exception("找不到任何文字！請嘗試提供更清晰的圖片。")
 
 def process_image_remove_text(input_file, output_path, status_callback, stop_event):
     from rapidocr_onnxruntime import RapidOCR
@@ -751,7 +767,7 @@ def process_image_remove_text(input_file, output_path, status_callback, stop_eve
     img = cv2.imdecode(np.fromfile(input_file, dtype=np.uint8), cv2.IMREAD_COLOR)
     if img is None: raise Exception("無法讀取圖片，請確認檔案是否損壞。")
 
-    ocr_engine = RapidOCR()
+    ocr_engine = RapidOCR(use_angle_cls=True, det_box_thresh=0.2, text_score=0.2)
     result, _ = ocr_engine(img)
     mask = np.zeros(img.shape[:2], dtype=np.uint8)
 
