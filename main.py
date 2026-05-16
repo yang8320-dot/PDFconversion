@@ -52,7 +52,7 @@ class ListManagerWindow(ctk.CTkToplevel):
     def __init__(self, app, initial_files, mode, start_callback):
         super().__init__(app.root)
         self.title("檔案合併管理器")
-        self.geometry("600x350")
+        self.geometry("550x300")
         self.start_callback = start_callback
         self.mode = mode
         self.app = app
@@ -63,11 +63,11 @@ class ListManagerWindow(ctk.CTkToplevel):
         list_frame = ctk.CTkFrame(self, fg_color="transparent")
         list_frame.pack(side="left", fill="both", expand=True, padx=(15, 5), pady=15)
         
-        ctk.CTkLabel(list_frame, text="合併檔案列表 (支援直接拖曳檔案進來)：", font=("Microsoft JhengHei", 14, "bold")).pack(anchor="w", pady=(0, 5))
+        ctk.CTkLabel(list_frame, text="合併檔案列表 (支援拖曳)：", font=("Microsoft JhengHei", 13, "bold")).pack(anchor="w", pady=(0, 5))
         
         scrollbar = tk.Scrollbar(list_frame)
         scrollbar.pack(side="right", fill="y")
-        self.listbox = tk.Listbox(list_frame, selectmode=tk.SINGLE, font=("Microsoft JhengHei", 11), yscrollcommand=scrollbar.set, activestyle="none")
+        self.listbox = tk.Listbox(list_frame, selectmode=tk.SINGLE, font=("Microsoft JhengHei", 10), yscrollcommand=scrollbar.set, activestyle="none")
         self.listbox.pack(side="left", fill="both", expand=True)
         scrollbar.config(command=self.listbox.yview)
         for f in initial_files: self.listbox.insert(tk.END, f)
@@ -77,11 +77,11 @@ class ListManagerWindow(ctk.CTkToplevel):
         
         file_types = [("支援的檔案", "*.pdf;*.jpg;*.jpeg;*.png;*.docx;*.doc")] if mode == "MERGE" else [("Images", "*.jpg;*.jpeg;*.png")]
             
-        ctk.CTkButton(btn_frame, text="➕ 新增檔案", command=lambda: [self.listbox.insert(tk.END, f) for f in filedialog.askopenfilenames(filetypes=file_types)]).pack(pady=5)
-        ctk.CTkButton(btn_frame, text="⬆️ 上移", command=self.move_up).pack(pady=5)
-        ctk.CTkButton(btn_frame, text="⬇️ 下移", command=self.move_down).pack(pady=5)
-        ctk.CTkButton(btn_frame, text="❌ 移除", command=self.remove_item, fg_color="#cc3333", hover_color="#aa2222").pack(pady=5)
-        ctk.CTkButton(btn_frame, text="🚀 開始處理", command=self.start_merge, fg_color="#28a745", hover_color="#218838", height=35).pack(side="bottom", pady=15)
+        ctk.CTkButton(btn_frame, text="➕ 新增", width=80, command=lambda: [self.listbox.insert(tk.END, f) for f in filedialog.askopenfilenames(filetypes=file_types)]).pack(pady=4)
+        ctk.CTkButton(btn_frame, text="⬆️ 上移", width=80, command=self.move_up).pack(pady=4)
+        ctk.CTkButton(btn_frame, text="⬇️ 下移", width=80, command=self.move_down).pack(pady=4)
+        ctk.CTkButton(btn_frame, text="❌ 移除", width=80, command=self.remove_item, fg_color="#cc3333", hover_color="#aa2222").pack(pady=4)
+        ctk.CTkButton(btn_frame, text="🚀 開始", width=80, command=self.start_merge, fg_color="#28a745", hover_color="#218838", height=30).pack(side="bottom", pady=10)
 
         self.drop_target_register(DND_FILES)
         self.dnd_bind('<<Drop>>', self.on_drop)
@@ -120,7 +120,9 @@ class PDFToolApp:
     def __init__(self, root):
         self.root = root
         self.root.title("PDF 辦公室全能工具箱 PRO")
-        self.root.geometry("850x650") 
+        # 【修改點】將介面從 850x650 大幅縮小為 720x540，變得更緊湊精緻
+        self.root.geometry("720x540") 
+        self.root.resizable(False, False) # 固定視窗大小避免跑版
         ctk.set_appearance_mode("light")  
         ctk.set_default_color_theme("blue")  
 
@@ -136,14 +138,14 @@ class PDFToolApp:
 
         # 頂部：標題與主題切換
         top_frame = ctk.CTkFrame(self.root, fg_color="transparent")
-        top_frame.pack(fill="x", padx=15, pady=(10, 0))
-        ctk.CTkLabel(top_frame, text="PDF 專業工具箱", font=("Microsoft JhengHei", 20, "bold")).pack(side="left")
-        self.theme_switch = ctk.CTkSwitch(top_frame, text="深色模式", command=self.toggle_theme, font=("Microsoft JhengHei", 12))
-        self.theme_switch.pack(side="right")
+        top_frame.pack(fill="x", padx=10, pady=(5, 0))
+        ctk.CTkLabel(top_frame, text="PDF 專業工具箱", font=("Microsoft JhengHei", 18, "bold")).pack(side="left", padx=5)
+        self.theme_switch = ctk.CTkSwitch(top_frame, text="深色模式", command=self.toggle_theme, font=("Microsoft JhengHei", 11), width=50)
+        self.theme_switch.pack(side="right", padx=5)
 
-        # 核心：標籤頁設計 (TabView)
-        self.tabview = ctk.CTkTabview(self.root, height=140)
-        self.tabview.pack(fill="x", padx=15, pady=5)
+        # 核心：標籤頁設計 (TabView) - 縮小高度
+        self.tabview = ctk.CTkTabview(self.root, height=120)
+        self.tabview.pack(fill="x", padx=10, pady=2)
         
         tab1 = self.tabview.add("📂 格式轉換")
         tab2 = self.tabview.add("✂️ 頁面編輯")
@@ -157,18 +159,19 @@ class PDFToolApp:
         modes_t4 = [("提取文字/OCR", "EXTRACT_TXT"), ("提取內嵌圖", "EXTRACT_IMGS"), ("加文字浮水印", "ADD_WM"), ("印章/圖片浮水印", "IMG_WM"), ("機密文字塗黑", "REDACT"), ("浮水印/文字抹除", "RMWATERMARK"), ("添加頁碼", "ADD_PAGE_NUM")]
 
         def create_radio_buttons(parent, modes_list):
+            # 將欄位從 4 欄改為 4 欄以適應縮小後的寬度
             for i, (text, val) in enumerate(modes_list):
                 row, col = divmod(i, 4)
-                ctk.CTkRadioButton(parent, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 13)).grid(row=row, column=col, padx=15, pady=10, sticky="w")
+                ctk.CTkRadioButton(parent, text=text, variable=self.mode_var, value=val, font=("Microsoft JhengHei", 12)).grid(row=row, column=col, padx=8, pady=5, sticky="w")
 
         create_radio_buttons(tab1, modes_t1)
         create_radio_buttons(tab2, modes_t2)
         create_radio_buttons(tab3, modes_t3)
         create_radio_buttons(tab4, modes_t4)
 
-        # 動態選項區
-        self.opt_frame = ctk.CTkFrame(self.root, fg_color="#eef5fa", corner_radius=8)
-        self.opt_frame.pack(fill="x", padx=15, pady=5)
+        # 動態選項區 - 減小邊距
+        self.opt_frame = ctk.CTkFrame(self.root, fg_color="#eef5fa", corner_radius=6)
+        self.opt_frame.pack(fill="x", padx=10, pady=2)
         
         self.extract_mode_var = ctk.StringVar(value="PDF 原生文字提取")
         self.rm_mode_var = ctk.StringVar(value="PDF 區域去浮水印")
@@ -178,45 +181,48 @@ class PDFToolApp:
         self.rotate_var = ctk.StringVar(value="90度")
         self.ppt_mode_var = ctk.StringVar(value="純圖片簡報 (較快)")
 
-        # 選項元件
-        self.lbl_ext_mode = ctk.CTkLabel(self.opt_frame, text="📄 來源選項:", font=("Microsoft JhengHei", 12, "bold"))
-        self.menu_ext_mode = ctk.CTkOptionMenu(self.opt_frame, variable=self.extract_mode_var, values=["PDF 原生文字提取", "圖片 AI OCR 辨識"], width=160, command=self.update_options_ui)
-        self.lbl_rm_mode = ctk.CTkLabel(self.opt_frame, text="🧹 抹除模式:", font=("Microsoft JhengHei", 12, "bold"))
-        self.menu_rm_mode = ctk.CTkOptionMenu(self.opt_frame, variable=self.rm_mode_var, values=["PDF 區域去浮水印", "圖片 AI 智慧抹除文字"], width=170, command=self.update_options_ui)
-        self.lbl_dpi = ctk.CTkLabel(self.opt_frame, text="⚙️ 畫質:", font=("Microsoft JhengHei", 12, "bold"))
-        self.menu_dpi = ctk.CTkOptionMenu(self.opt_frame, variable=self.quality_var, values=["原畫質 (300 DPI)", "高畫質 (200 DPI)", "中畫質 (150 DPI)", "低畫質 (72 DPI)"], width=130)
-        self.lbl_wm = ctk.CTkLabel(self.opt_frame, text="📍 位置:", font=("Microsoft JhengHei", 12, "bold"))
-        self.menu_wm = ctk.CTkOptionMenu(self.opt_frame, variable=self.wm_pos_var, values=["右下角", "左下角", "右上角", "左上角", "正中央"], width=100)
-        self.lbl_stamp = ctk.CTkLabel(self.opt_frame, text="📑 目標頁面:", font=("Microsoft JhengHei", 12, "bold"))
-        self.menu_stamp = ctk.CTkOptionMenu(self.opt_frame, variable=self.stamp_page_var, values=["全部頁面", "僅第一頁", "僅最後一頁"], width=100)
-        self.lbl_rot = ctk.CTkLabel(self.opt_frame, text="🔄 旋轉:", font=("Microsoft JhengHei", 12, "bold"))
-        self.menu_rot = ctk.CTkOptionMenu(self.opt_frame, variable=self.rotate_var, values=["90度", "180度", "270度"], width=90)
-        self.lbl_ppt = ctk.CTkLabel(self.opt_frame, text="📄 模式:", font=("Microsoft JhengHei", 12, "bold"))
-        self.menu_ppt = ctk.CTkOptionMenu(self.opt_frame, variable=self.ppt_mode_var, values=["圖文排版 (智慧 OCR)", "純圖片簡報 (較快)"], width=160)
+        # 選項元件 - 稍微縮小字體與寬度
+        self.lbl_ext_mode = ctk.CTkLabel(self.opt_frame, text="📄 來源選項:", font=("Microsoft JhengHei", 11, "bold"))
+        self.menu_ext_mode = ctk.CTkOptionMenu(self.opt_frame, variable=self.extract_mode_var, values=["PDF 原生文字提取", "圖片 AI OCR 辨識"], width=140, height=24)
+        self.lbl_rm_mode = ctk.CTkLabel(self.opt_frame, text="🧹 抹除模式:", font=("Microsoft JhengHei", 11, "bold"))
+        self.menu_rm_mode = ctk.CTkOptionMenu(self.opt_frame, variable=self.rm_mode_var, values=["PDF 區域去浮水印", "圖片 AI 智慧抹除文字"], width=150, height=24)
+        self.lbl_dpi = ctk.CTkLabel(self.opt_frame, text="⚙️ 畫質:", font=("Microsoft JhengHei", 11, "bold"))
+        self.menu_dpi = ctk.CTkOptionMenu(self.opt_frame, variable=self.quality_var, values=["原畫質 (300 DPI)", "高畫質 (200 DPI)", "中畫質 (150 DPI)", "低畫質 (72 DPI)"], width=120, height=24)
+        self.lbl_wm = ctk.CTkLabel(self.opt_frame, text="📍 位置:", font=("Microsoft JhengHei", 11, "bold"))
+        self.menu_wm = ctk.CTkOptionMenu(self.opt_frame, variable=self.wm_pos_var, values=["右下角", "左下角", "右上角", "左上角", "正中央"], width=90, height=24)
+        self.lbl_stamp = ctk.CTkLabel(self.opt_frame, text="📑 目標頁:", font=("Microsoft JhengHei", 11, "bold"))
+        self.menu_stamp = ctk.CTkOptionMenu(self.opt_frame, variable=self.stamp_page_var, values=["全部頁面", "僅第一頁", "僅最後一頁"], width=90, height=24)
+        self.lbl_rot = ctk.CTkLabel(self.opt_frame, text="🔄 旋轉:", font=("Microsoft JhengHei", 11, "bold"))
+        self.menu_rot = ctk.CTkOptionMenu(self.opt_frame, variable=self.rotate_var, values=["90度", "180度", "270度"], width=80, height=24)
+        self.lbl_ppt = ctk.CTkLabel(self.opt_frame, text="📄 模式:", font=("Microsoft JhengHei", 11, "bold"))
+        self.menu_ppt = ctk.CTkOptionMenu(self.opt_frame, variable=self.ppt_mode_var, values=["圖文排版 (智慧 OCR)", "純圖片簡報 (較快)"], width=140, height=24)
         
+        # 綁定事件：當選單內容改變時，觸發 update_options_ui
+        self.menu_ext_mode.configure(command=self.update_options_ui)
+        self.menu_rm_mode.configure(command=self.update_options_ui)
         self.mode_var.trace_add("write", self.update_options_ui)
         self.update_options_ui() 
 
-        # 拖曳區
-        self.drop_frame = ctk.CTkFrame(self.root, fg_color="#f9f9f9", border_width=2, border_color="#3a7ebf", corner_radius=15, height=70)
-        self.drop_frame.pack(fill="x", padx=15, pady=5)
+        # 拖曳區 - 高度縮小
+        self.drop_frame = ctk.CTkFrame(self.root, fg_color="#f9f9f9", border_width=2, border_color="#3a7ebf", corner_radius=10, height=50)
+        self.drop_frame.pack(fill="x", padx=10, pady=5)
         self.drop_frame.pack_propagate(False)
-        self.status_label = ctk.CTkLabel(self.drop_frame, text="📁 將檔案拖曳至此 或 點擊選擇檔案", font=("Microsoft JhengHei", 15, "bold"), text_color="#555")
+        self.status_label = ctk.CTkLabel(self.drop_frame, text="📁 將檔案拖曳至此 或 點擊選擇檔案", font=("Microsoft JhengHei", 13, "bold"), text_color="#555")
         self.status_label.pack(expand=True)
         self.drop_frame.bind("<Button-1>", lambda e: self.browse_file()); self.status_label.bind("<Button-1>", lambda e: self.browse_file())
         self.root.drop_target_register(DND_FILES); self.root.dnd_bind('<<Drop>>', self.on_drop)
 
         # 進度與取消
         action_frame = ctk.CTkFrame(self.root, fg_color="transparent")
-        action_frame.pack(fill="x", padx=15, pady=5)
-        self.progress_bar = ctk.CTkProgressBar(action_frame)
+        action_frame.pack(fill="x", padx=10, pady=2)
+        self.progress_bar = ctk.CTkProgressBar(action_frame, height=12)
         self.progress_bar.pack(side="left", expand=True, fill="x", padx=(0, 10)); self.progress_bar.set(0)
-        self.cancel_btn = ctk.CTkButton(action_frame, text="取消任務", fg_color="#cc3333", hover_color="#aa2222", state="disabled", command=self.cancel_task, width=90)
+        self.cancel_btn = ctk.CTkButton(action_frame, text="取消任務", fg_color="#cc3333", hover_color="#aa2222", state="disabled", command=self.cancel_task, width=70, height=26)
         self.cancel_btn.pack(side="right")
 
-        # 日誌終端區 (Console)
-        self.log_box = ctk.CTkTextbox(self.root, height=120, font=("Consolas", 12), state="disabled", fg_color="#1e1e1e", text_color="#00ff00")
-        self.log_box.pack(fill="both", expand=True, padx=15, pady=(5, 15))
+        # 日誌終端區 (Console) - 高度縮小
+        self.log_box = ctk.CTkTextbox(self.root, height=80, font=("Consolas", 11), state="disabled", fg_color="#1e1e1e", text_color="#00ff00")
+        self.log_box.pack(fill="both", expand=True, padx=10, pady=(5, 10))
         self.write_log("✅ 系統初始化完成，等待任務輸入...")
 
     def toggle_theme(self):
@@ -238,21 +244,21 @@ class PDFToolApp:
         mode = self.mode_var.get()
         
         if mode == "EXTRACT_TXT":
-            self.lbl_ext_mode.pack(side="left", padx=(10, 5), pady=5); self.menu_ext_mode.pack(side="left", padx=(0, 15))
+            self.lbl_ext_mode.pack(side="left", padx=(5, 2), pady=3); self.menu_ext_mode.pack(side="left", padx=(0, 10))
         if mode == "RMWATERMARK":
-            self.lbl_rm_mode.pack(side="left", padx=(10, 5), pady=5); self.menu_rm_mode.pack(side="left", padx=(0, 15))
+            self.lbl_rm_mode.pack(side="left", padx=(5, 2), pady=3); self.menu_rm_mode.pack(side="left", padx=(0, 10))
             if self.rm_mode_var.get() == "PDF 區域去浮水印":
-                self.lbl_dpi.pack(side="left", padx=(10, 5), pady=5); self.menu_dpi.pack(side="left", padx=(0, 15))
-                self.lbl_wm.pack(side="left", padx=(5, 5), pady=5); self.menu_wm.pack(side="left", padx=(0, 15))
+                self.lbl_dpi.pack(side="left", padx=(5, 2), pady=3); self.menu_dpi.pack(side="left", padx=(0, 10))
+                self.lbl_wm.pack(side="left", padx=(5, 2), pady=3); self.menu_wm.pack(side="left", padx=(0, 10))
         if mode in ["PPT", "PDF2IMG", "GRAYSCALE", "FLATTEN"]:
-            self.lbl_dpi.pack(side="left", padx=(10, 5), pady=5); self.menu_dpi.pack(side="left", padx=(0, 15))
+            self.lbl_dpi.pack(side="left", padx=(5, 2), pady=3); self.menu_dpi.pack(side="left", padx=(0, 10))
         if mode == "PPT":
-            self.lbl_ppt.pack(side="left", padx=(10, 5), pady=5); self.menu_ppt.pack(side="left", padx=(0, 15))
+            self.lbl_ppt.pack(side="left", padx=(5, 2), pady=3); self.menu_ppt.pack(side="left", padx=(0, 10))
         if mode == "IMG_WM":
-            self.lbl_stamp.pack(side="left", padx=(10, 5), pady=5); self.menu_stamp.pack(side="left", padx=(0, 15))
-            self.lbl_wm.pack(side="left", padx=(5, 5), pady=5); self.menu_wm.pack(side="left", padx=(0, 15))
+            self.lbl_stamp.pack(side="left", padx=(5, 2), pady=3); self.menu_stamp.pack(side="left", padx=(0, 10))
+            self.lbl_wm.pack(side="left", padx=(5, 2), pady=3); self.menu_wm.pack(side="left", padx=(0, 10))
         if mode == "ROTATE":
-            self.lbl_rot.pack(side="left", padx=(10, 5), pady=5); self.menu_rot.pack(side="left", padx=(0, 15))
+            self.lbl_rot.pack(side="left", padx=(5, 2), pady=3); self.menu_rot.pack(side="left", padx=(0, 10))
 
     def cancel_task(self):
         self.stop_event.set()
@@ -437,26 +443,4 @@ class PDFToolApp:
                         if self.stop_event.is_set(): break
                         base = os.path.splitext(os.path.basename(file))[0]
                         self.update_status(f"🔄 批次處理中 ({idx+1}/{len(files)}): {base}", idx/len(files))
-                        process_pdf_to_ppt(file, os.path.join(output_data, base + ".pptx"), dpi=extra["dpi"], ppt_mode=extra["ppt_mode"], **kwargs)
-                else: process_pdf_to_ppt(input_data[0], output_data, dpi=extra["dpi"], ppt_mode=extra["ppt_mode"], **kwargs)
-
-            if self.stop_event.is_set(): self.write_log("⛔ 任務已中斷")
-            else:
-                self.write_log("✅ 任務執行成功！")
-                self.root.after(0, lambda: self.progress_bar.set(1))
-                msg = result_msg if result_msg else "作業成功！檔案已處理完成。"
-                messagebox.showinfo("完成", msg)
-                open_file_or_folder(output_data) 
-        except Exception as e:
-            self.write_log(f"❌ 發生錯誤: {str(e)}")
-            messagebox.showerror("錯誤", f"執行錯誤：\n{e}")
-        finally: self.root.after(0, lambda: self.set_ui_state("normal"))
-
-def main():
-    set_dpi_awareness()
-    _mutex = check_single_instance()
-    root = CTkinterDnD()
-    app = PDFToolApp(root)
-    root.mainloop()
-
-if __name__ == "__main__": main()
+                        process_pd
